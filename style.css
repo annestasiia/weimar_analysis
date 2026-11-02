@@ -650,8 +650,6 @@ a.btn-material:hover { background: var(--text); color: #fff; }
 .cnt-checks { flex-direction: row; gap: 14px; }
 .cnt-check { display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
 .cnt-check input { margin: 0; accent-color: var(--text); }
-.cnt-peak { padding: 5px 6px; background: #FFFFFF; border: 1px solid var(--text); border-radius: 0; font-size: 11px; font-weight: 700; cursor: pointer; text-align: left; }
-.cnt-peak:hover { background: var(--text); color: #FFFFFF; }
 .cnt-legend-bar { height: 10px; border: 1px solid var(--text); }
 .cnt-legend-ticks { display: flex; justify-content: space-between; font-size: 10px; margin-top: 2px; }
 .cnt-note { font-size: 11px; font-style: italic; color: var(--text-dim); }
@@ -665,7 +663,6 @@ a.btn-material:hover { background: var(--text); color: #fff; }
 .cnt-table th:first-child { text-align: left; }
 .cnt-table tr:first-child th { border-bottom: 1px solid var(--text); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
 .cnt-table tr:first-child th:first-child { text-transform: none; letter-spacing: 0; font-size: 11px; }
-.cnt-table td.avg { color: var(--text-dim); }
 .cnt-table td.filled { font-style: italic; color: #A0522D; cursor: help; }
 .cnt-table td.cur { background: var(--text); color: #FFFFFF; }
 .cnt-stats { font-size: 11px; line-height: 1.4; }

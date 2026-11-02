@@ -1414,6 +1414,8 @@ function _isBuildingLayer(layer) {
   return /^weimar_buildings/.test(layer.id) || /buildings_footprint/.test(layer.url || "");
 }
 function _isParcelLayer(layer) { return /^weimar_parcels(_use|_outline)?$/.test(layer.id); }
+// Counting points: one Rhino parent layer (layer.rhinoLayer), one child per year (layer.rhinoChild, only the years ticked in the export).
+function _isCountingLayer(layer) { return !!(layer.rhinoLayer && layer.rhinoChild); }
 
 /**
  * Builds the .3dm + manifest + attribution zip. Returns
@@ -1527,19 +1529,22 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     const isS = !!ssMeta;                                              // TASK 31: Space Syntax networks
     const useMeta = layerMetas.find((m) => _isUseLayer(m.layer));
     const isU = !!useMeta;                                             // TASK 39: split by useCategory
-    const layName = uniqueName(isS ? (ssMeta.layer.rhinoLayer || group.name) : isU ? useMeta.layer.rhinoLayer : group.name);
+    const cntMetas = layerMetas.filter((m) => _isCountingLayer(m.layer));
+    const isC = cntMetas.length > 0;
+    const layName = uniqueName(isS ? (ssMeta.layer.rhinoLayer || group.name) : isU ? useMeta.layer.rhinoLayer : isC ? cntMetas[0].layer.rhinoLayer : group.name);
     const isF = layerMetas.some((m) => _isFootprintLayer(m.layer));   // TASK 30: flat, z=0, named by buildingId
     const isB = !isF && layerMetas.some((m) => _isBuildingLayer(m.layer));
     const isP = layerMetas.some((m) => _isParcelLayer(m.layer));
     // Parent layer + one child per category (always all of them, so the Layers panel looks the same for any
     // selection; empty categories stay empty). Child names are not in usedNames: Rhino only needs them unique per parent.
-    const useCats = manifest[(useMeta && useMeta.layer.colorBy.palette) || "useCategories"] || [];
+    const useCats = isC ? cntMetas.map((m) => ({ name: m.layer.rhinoChild, color: m.layer.style && m.layer.style.markerColor }))
+      : manifest[(useMeta && useMeta.layer.colorBy.palette) || "useCategories"] || [];
     // (re)created in every part this group spills into, with the same names
     let lay, childIdx, curLayerIdx;
     const setupLayers = () => {
       lay = addLayer(layName);
       childIdx = new Map();
-      if (isU) {
+      if (isU || isC) {
         const parentId = doc.layers().get(lay.idx).id;
         for (const c of useCats) {
           const l = new rhino.Layer(); l.name = c.name; l.parentLayerId = parentId;
@@ -1552,9 +1557,10 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     };
     setupLayers();
     const st = { name: layName, features: mergedFeatures.length, objects: 0, flatNoHeight: 0, skipped: 0, skippedIds: [], types: {},
-      children: isU ? Object.fromEntries(useCats.map((c) => [c.name, 0])) : undefined,
-      kind: isU ? (isF ? "footprints_by_use" : isP ? "parcels_by_use" : "buildings_by_use") : isS ? "spacesyntax" : isF ? "footprints" : isB ? "buildings" : isP ? "parcels" : "generic" };
-    const keys = isS ? ["ssId", "network", "pathType", "length", "srcClass"] : isF ? ["usage", "useCategory", "height", "floors", "buildingId", "area", "areaSource"] : isB ? ["usage", "useCategory", "height", "floors", "buildingId", "eaveHeight", "ridgeHeight", "roofType", "heightWithAttic", "atticFloorLikely"] : isP ? ["usage", "useCategory", "area", "areaSource"] : null;
+      children: isU || isC ? Object.fromEntries(useCats.map((c) => [c.name, 0])) : undefined,
+      kind: isC ? "counting_points" : isU ? (isF ? "footprints_by_use" : isP ? "parcels_by_use" : "buildings_by_use") : isS ? "spacesyntax" : isF ? "footprints" : isB ? "buildings" : isP ? "parcels" : "generic" };
+    const keys = isC ? ["Project No", "Database No", "2016 Pedestrian", "2016 Source", "2025 Pedestrian", "2025 Vehicular", "2026 Pedestrian", "2026 Vehicular"]
+      : isS ? ["ssId", "network", "pathType", "length", "srcClass"] : isF ? ["usage", "useCategory", "height", "floors", "buildingId", "area", "areaSource"] : isB ? ["usage", "useCategory", "height", "floors", "buildingId", "eaveHeight", "ridgeHeight", "roofType", "heightWithAttic", "atticFloorLikely"] : isP ? ["usage", "useCategory", "area", "areaSource"] : null;
 
     const attrFor = (f, name) => {
       const a = new rhino.ObjectAttributes();
@@ -1581,6 +1587,9 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
         let cat = null;
         if (isU) {
           cat = childIdx.has(f.properties && f.properties.useCategory) ? f.properties.useCategory : "Other";
+          curLayerIdx = childIdx.get(cat);
+        } else if (isC) {
+          cat = f.properties.year;
           curLayerIdx = childIdx.get(cat);
         }
         const polys = !g ? [] : g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : null;
@@ -1617,6 +1626,7 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
           for (const [lng, lat] of pts) {
             const [e, n] = _toUtm32(lng, lat);
             doc.objects().add(new rhino.Point([e - ox, n - oy, 0]), attrFor(f, nm)); st.objects++; st.types.point = (st.types.point || 0) + 1;
+            if (cat) st.children[cat]++;
           }
         } else st.skipped++;
       } catch (err) {
@@ -1909,7 +1919,7 @@ function createExportController({ map, viewport, ui }) {
   };
 
   const exportableIdsOf = (ids) =>
-    ids.filter((id) => { const l = layerById(id); return l && l.type === "geojson"; });
+    ids.filter((id) => { const l = layerById(id); return l && l.type === "geojson" && !l.noExport; });
 
   // One export file per sidebar row (`decorateRow` call), not per raw layer
   // id — a row like "Pedestrian roads" can be backed by several ATKIS layer
@@ -2125,7 +2135,7 @@ function createExportController({ map, viewport, ui }) {
     const cb = h("input", "export-check", { type: "checkbox" });
     if (exportableIds.length === 0) {
       cb.disabled = true;
-      wrapper.title = "No exportable vector geometry (raster / 3D-tiles layer)";
+      wrapper.title = "Nothing to export here (raster / 3D-tiles / label layer)";
     } else {
       wrapper.title = "Include this layer in the export package";
     }

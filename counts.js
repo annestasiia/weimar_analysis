@@ -4,8 +4,8 @@
  * type "counts" and uses app.js globals (h, resolveUrl) at call time.
  *
  * Data (tools/build_pedestrian_counts.py):
- *   config.url      one Point per gate (all years, common names), keys c16_<day>_<time>_<measure> (2016, per 15 min),
- *                   c25_all / c25_veh (2025 peak hour, PER HOUR), c26_<measure> (2026, working day 16–18), years "2016, 2025"
+ *   config.url      one Point per gate (all years, common names), keys c16_WD2_PM_all (2016, per 15 min) and the other 2016 slots,
+ *                   c25_all / c25_veh, c26_all / c26_veh (PER HOUR), point2025 / point2026 (number in the model), years "2016, 2025"
  *   config.heatUrl  short network pieces, `g` = "gateIndex:metres,…" within the FC's heatRadius
  *
  * The heat geometry is loaded once; each piece keeps its HEAT_K nearest gates (g0..g2 / d0..d2) and a switch only
@@ -13,16 +13,13 @@
  */
 "use strict";
 
-const COUNT_DAYS = [["WE", "Weekend"], ["WD1", "Workday 1"], ["WD2", "Workday 2"], ["WDA", "Ø Workdays"]];
-const COUNT_TIMES = [["AM", "8–10"], ["MD", "12–14"], ["PM", "16–18"]];
-const COUNT_MEASURES = [["all", "Pedestrians"], ["ind", "Ped. w/o groups"], ["cyc", "Cyclists"]];   // 2016 / 2026
-const COUNT_MEASURES_25 = ["all", "veh"];                                   // 2025: pedestrians + vehicles only
-const ALL_MEASURES = [...COUNT_MEASURES, ["veh", "Vehicles"]];
+// One view per year: workday, 16–17. 2016 = Workday 2 pedestrians only; 2025 / 2026 = pedestrians or vehicles.
+const COUNT_KEY_2016 = "c16_WD2_PM_all";
+const COUNT_YEARS = ["2016", "2025", "2026"];
+const COUNT_MEASURES = [["all", "Pedestrians"], ["veh", "Vehicles"]];
 const COUNT_RAMP = ["#FFF1A8", "#FFD500", "#F7A21B", "#EE5A14", "#E3262A", "#8C1018"];
-const COUNT_BREAKS = { all: [0, 10, 25, 60, 150, 350], ind: [0, 10, 25, 60, 150, 350], cyc: [0, 2, 5, 10, 20, 40] };
-const HOUR_BREAKS = { all: [0, 50, 100, 200, 400, 800], veh: [0, 50, 150, 300, 600, 1200] };   // 2025, per hour
-const DELTA_RAMP = ["#0F3E7A", "#0F5FB5", "#9CC3EE", "#F2F2F2", "#F7A21B", "#E3262A", "#8C1018"];
-const DELTA_BREAKS = { all: [-150, -50, -10, 0, 10, 50, 150], ind: [-150, -50, -10, 0, 10, 50, 150], cyc: [-20, -8, -2, 0, 2, 8, 20] };
+const COUNT_BREAKS = { all: [0, 10, 25, 60, 150, 350] };                                       // 2016, per 15 min
+const HOUR_BREAKS = { all: [0, 50, 100, 200, 400, 800], veh: [0, 50, 150, 300, 600, 1200] };   // 2025 / 2026, per hour
 const COUNT_NO_DATA = "#FFFFFF";
 const HEAT_K = 3;   // gates mixed per heat piece (nearest first)
 
@@ -30,25 +27,17 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
   const P = `${config.id}__`;
   const ids = { heat: P + "heat", pts: P + "pts", lbl: P + "lbl" };
   const layerIds = [ids.heat, ids.pts, ids.lbl];
-  const st = { year: "2016", day: "WDA", time: "PM", measure: "all", numbers: true, heat: true, on: !!visible, sel: null };
-  let gates = null, R = 150, has26 = false;
+  const st = { year: "2016", measure: "all", numbers: true, heat: true, on: !!visible, sel: null };
+  let gates = null, R = 150;
   const yearsOf = (p) => String(p.years || "2016");
-  // gates shown for the selected year (2026 is counted at the 2016 gates)
-  const inYear = (p) => st.year === "2025" ? yearsOf(p).includes("2025") : yearsOf(p).includes("2016");
+  const inYear = (p) => yearsOf(p).includes(st.year);
 
   // ---------------------------------------------------------------- value of a gate for the current selection
-  const lookup = (p, s = st) => {
-    const v16 = p[`c16_${s.day}_${s.year === "2016" ? s.time : "PM"}_${s.measure}`];
-    const v26 = p[`c26_${s.measure}`];
-    if (s.year === "2025") return p[`c25_${s.measure}`] ?? null;
-    if (s.year === "2016") return v16 ?? null;
-    if (s.year === "2026") return v26 ?? null;
-    return v16 == null || v26 == null ? null : v26 - v16;
-  };
-  const isDelta = () => st.year === "delta";
-  const breaks = () => (isDelta() ? DELTA_BREAKS : st.year === "2025" ? HOUR_BREAKS : COUNT_BREAKS)[st.measure];
+  const lookup = (p, year = st.year, measure = st.measure) =>
+    (year === "2016" ? p[COUNT_KEY_2016] : p[`c${year.slice(2)}_${measure}`]) ?? null;
+  const breaks = () => (st.year === "2016" ? COUNT_BREAKS : HOUR_BREAKS)[st.measure];
   const colorExpr = (get) => {
-    const br = breaks(), ramp = isDelta() ? DELTA_RAMP : COUNT_RAMP;
+    const br = breaks(), ramp = COUNT_RAMP;
     return ["case", ["==", ["typeof", get], "number"],
       ["interpolate", ["linear"], get, ...br.flatMap((b, i) => [b, ramp[i]])], COUNT_NO_DATA];
   };
@@ -64,7 +53,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
     const v = ["/", ["+", ...ks.map((i) => ["*", w[i], at(val, i)])], ["max", ["+", ...w], 1e-9]];
     return { color: colorExpr(v), opacity: ["*", 0.9, ["max", ...ks.map((i) => ["*", at(has, i), near(i, 0.8)])]] };
   };
-  const fmt = (v) => (v == null ? "–" : (isDelta() && v > 0 ? "+" : "") + (Math.round(v * 10) / 10));
+  const fmt = (v) => (v == null ? "–" : String(Math.round(v * 10) / 10));
 
   // ---------------------------------------------------------------- map layers
   const vis = (on) => (on ? "visible" : "none");
@@ -107,8 +96,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
 
   function repaint() {
     if (!gates || !map.getLayer(ids.pts)) return;
-    // 2025 has pedestrians + vehicles only; vehicles exist only in 2025
-    if (st.year === "2025" ? !COUNT_MEASURES_25.includes(st.measure) : st.measure === "veh") st.measure = "all";
+    if (st.year === "2016") st.measure = "all";   // vehicles were not counted in 2016
     const vals = gates.features.map((f) => lookup(f.properties));
     map.getSource(ids.pts).setData({ type: "FeatureCollection", features: gates.features.flatMap((f, i) => inYear(f.properties) ? [{
       type: "Feature", id: i, geometry: f.geometry,
@@ -149,14 +137,9 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
   }
   function renderControls() {
     controls.innerHTML = "";
-    const no26 = "No 2026 counts yet (data/raw/teacher_ss_model/Calculations/Pedestrian counting 2026.csv)";
     controls.append(
-      seg("Year", [["2016", "2016"], ["2025", "2025", "Winter semester 2025: peak hour on a working day, per hour"],
-        ["2026", "2026", has26 ? "" : no26], ["delta", "Δ 26–16", has26 ? "2026 minus 2016, 16–18" : no26]], "year",
-        (v) => (v === "2026" || v === "delta") && !has26),
-      seg("Day", COUNT_DAYS, "day", (v) => st.year === "2026" || st.year === "2025" || (st.year === "delta" && v === "WE")),
-      seg("Time", COUNT_TIMES, "time", (v) => st.year !== "2016" && v !== "PM"),
-      seg("Count", ALL_MEASURES, "measure", (v) => st.year === "2025" ? !COUNT_MEASURES_25.includes(v) : v === "veh"),
+      seg("Year", COUNT_YEARS.map((y) => [y, y]), "year"),
+      seg("Count", COUNT_MEASURES, "measure", (v) => st.year === "2016" && v === "veh"),
     );
     const show = h("div", "cnt-row cnt-checks");
     for (const [key, t] of [["numbers", "Numbers"], ["heat", "Heat on streets"]]) {
@@ -166,28 +149,21 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
       const s = h("span"); s.textContent = t;
       lab.append(cb, s); show.append(lab);
     }
-    const peak = h("button", "cnt-peak", { type: "button", title: "Working days, 16–18, all pedestrians — the 2016 slot comparable with the 2026 count at 17:00" });
-    peak.textContent = "★ Peak hour (Ø Workdays · 16–18 · Pedestrians)";
-    peak.addEventListener("click", () => { Object.assign(st, { day: "WDA", time: "PM", measure: "all" }); repaint(); });
-    controls.append(show, peak, legendBar());
-    if (st.year !== "2016") {
-      const n = h("div", "cnt-note");
-      n.textContent = st.year === "2025" ? "2025: one peak-hour count on a working day, per hour (2016: per 15 min). Gates V1–Z1 are new in 2025."
-        : st.year === "2026" ? "2026: one count on a working day at 17:00." : `Δ = 2026 minus 2016 (${COUNT_DAYS.find((d) => d[0] === st.day)[1]}, 16–18).`;
-      controls.append(n);
-    }
+    const n = h("div", "cnt-note");
+    n.textContent = st.year === "2016" ? "2016 · Workday 2 · 16–17 · per 15 min, not per hour. 48 gates without that count show Workday 1."
+      : `${st.year} · Workday · 16–17 · per hour.`;
+    controls.append(show, legendBar(), n);
   }
   function legendBar() {
     const wrap = h("div", "cnt-legend");
-    const br = breaks(), ramp = isDelta() ? DELTA_RAMP : COUNT_RAMP;
+    const br = breaks(), ramp = COUNT_RAMP;
     const bar = h("div", "cnt-legend-bar");
     bar.style.background = `linear-gradient(to right, ${ramp.join(", ")})`;
     const ticks = h("div", "cnt-legend-ticks");
-    for (const b of br) { const t = h("span"); t.textContent = (isDelta() && b > 0 ? "+" : "") + b + (b === br[br.length - 1] && !isDelta() ? "+" : ""); ticks.append(t); }
+    for (const b of br) { const t = h("span"); t.textContent = b + (b === br[br.length - 1] ? "+" : ""); ticks.append(t); }
     const cap = h("div", "cnt-note");
-    cap.textContent = isDelta() ? "Change, people / 15 min"
-      : st.year === "2025" ? `${st.measure === "veh" ? "Vehicles" : "People"} per hour (peak hour) · white = not counted`
-      : "People crossing the gate in 15 min · white = no count";
+    cap.textContent = st.year === "2016" ? "People crossing the gate in 15 min · white = no count"
+      : `${st.measure === "veh" ? "Vehicles" : "People"} per hour · white = not counted`;
     wrap.append(bar, ticks, cap);
     return wrap;
   }
@@ -200,7 +176,6 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
     if (!f) return;
     const p = f.properties;
     const prev = st.sel; st.sel = name;
-    const filled = new Map((p.filled || "").split(",").filter(Boolean).map((s) => { const [k, src] = s.split(":"); return [k, src]; }));
     card.innerHTML = "";
     const head = h("div", "cnt-card-head");
     const title = h("div", "tools-label"); title.textContent = `Counting gate ${name}`;
@@ -214,58 +189,38 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
     const big = h("div", "cnt-big");
     const bigV = h("span", "cnt-big-v"); bigV.textContent = fmt(cur);
     const bigT = h("span", "cnt-big-t");
-    const dayName = st.year === "2026" ? "Working day 2026" : COUNT_DAYS.find((d) => d[0] === st.day)[1];
-    const mName = ALL_MEASURES.find((m) => m[0] === st.measure)[1];
-    bigT.textContent = (st.year === "2025" ? `Peak hour 2025 · ${mName} / h`
-      : `${st.year === "delta" ? "Δ 2026–2016 · " : ""}${dayName} · ${st.year === "2016" ? COUNT_TIMES.find((t) => t[0] === st.time)[1] : "16–18"} · ${mName}`)
+    const mName = COUNT_MEASURES.find((m) => m[0] === st.measure)[1];
+    bigT.textContent = `${st.year} · Workday · 16–17 · ${mName}${st.year === "2016" ? " / 15 min" : " / h"}`
       + (cur != null ? ` · rank ${vals.indexOf(cur) + 1} of ${vals.length}` : "");
     big.append(bigV, bigT);
     card.append(big);
 
-    const in16 = yearsOf(p).includes("2016");
-    for (const [m, mName] of in16 ? COUNT_MEASURES : []) {
-      const t = h("table", "cnt-table");
-      const hr = h("tr"); const c0 = h("th"); c0.textContent = mName; hr.append(c0);
-      for (const [, tName] of COUNT_TIMES) { const th = h("th"); th.textContent = tName; hr.append(th); }
-      t.append(hr);
-      for (const [d, dName] of COUNT_DAYS) {
-        const tr = h("tr"); const th = h("th"); th.textContent = dName; tr.append(th);
-        for (const [tm] of COUNT_TIMES) {
-          const k = `${d}_${tm}_${m}`, v = p[`c16_${k}`];
-          const td = h("td");
-          td.textContent = v == null ? "–" : String(Math.round(v * 10) / 10);
-          const src = filled.get(k);
-          if (src) { td.classList.add("filled"); td.textContent += "*"; td.title = src === "all" ? "Filled: = all pedestrians of this slot" : `Filled from ${src === "WD1" ? "Workday 1" : "Workday 2"}`; }
-          if (d === "WDA") td.classList.add("avg");
-          if (st.year === "2016" && d === st.day && tm === st.time && m === st.measure) td.classList.add("cur");
-          tr.append(td);
-        }
-        t.append(tr);
-      }
-      card.append(t);
+    // all years of this gate: value of each year + the number the point has in that year's model
+    const t = h("table", "cnt-table");
+    const hr = h("tr");
+    for (const name of ["Year", "No. in model", "Pedestrians", "Vehicles"]) { const th = h("th"); th.textContent = name; hr.append(th); }
+    t.append(hr);
+    const in16Filled = (p.filled || "").includes("WD2_PM_all:WD1");
+    for (const y of COUNT_YEARS) {
+      const on = yearsOf(p).includes(y);
+      const tr = h("tr");
+      const th = h("th"); th.textContent = y; tr.append(th);
+      const cells = [on ? (y === "2016" ? name : p[`point${y}`] ?? "–") : "–", on ? fmt(lookup(p, y, "all")) : "–", on && y !== "2016" ? fmt(lookup(p, y, "veh")) : "–"];
+      cells.forEach((c, i) => {
+        const td = h("td"); td.textContent = String(c);
+        if (y === "2016" && i === 1 && in16Filled && on) { td.classList.add("filled"); td.textContent += "*"; td.title = "Workday 1: no Workday 2 count at this gate"; }
+        if (y === st.year && i === (st.measure === "veh" ? 2 : 1)) td.classList.add("cur");
+        tr.append(td);
+      });
+      t.append(tr);
     }
-    const raw = COUNT_DAYS.slice(0, 3).flatMap(([d]) => COUNT_TIMES.map(([tm]) => p[`c16_${d}_${tm}_all`])).filter((v) => v != null);
-    const stats = h("div", "cnt-stats");
-    stats.textContent = raw.length
-      ? `Pedestrians 2016, all ${raw.length} counts: min ${Math.min(...raw)} · max ${Math.max(...raw)} · mean ${Math.round(raw.reduce((a, b) => a + b, 0) / raw.length * 10) / 10}`
-      : "";
-    if (!in16) stats.textContent = "2016: no gate here (first counted in 2025).";
-    const y25 = h("div", "cnt-stats");
-    y25.textContent = !yearsOf(p).includes("2025") ? "2025: not a count point."
-      : p.c25_all != null || p.c25_veh != null ? `2025 (peak hour, per hour): pedestrians ${p.c25_all ?? "–"} · vehicles ${p.c25_veh ?? "–"}`
-      : "2025: count point, but not counted.";
-    const y26 = h("div", "cnt-stats");
-    y26.textContent = p.c26_all != null || p.c26_cyc != null
-      ? `2026 (working day, 17:00): pedestrians ${p.c26_all ?? "–"} · w/o groups ${p.c26_ind ?? "–"} · cyclists ${p.c26_cyc ?? "–"} · Δ to Ø workdays 16–18: ${p.c26_all != null && p.c16_WDA_PM_all != null ? fmtSigned(p.c26_all - p.c16_WDA_PM_all) : "–"}`
-      : "2026: not counted yet.";
     const note = h("div", "tools-note");
-    note.textContent = "2016: people crossing the gate line in 15 min, both directions, older than 10. * = gap filled from the other working day (hover for the source). Ø Workdays = mean of Workday 1 and 2. 2025: per hour.";
-    card.append(stats, y25, y26, note);
+    note.textContent = "Workday, 16–17. 2016: people crossing the gate in 15 min, Workday 2. * = Workday 1, no Workday 2 count here. 2025, 2026: per hour. – = no count.";
+    card.append(t, note);
     card.hidden = false;
     if (prev !== name) repaint();
     if (scroll) card.scrollIntoView({ block: "nearest" });
   }
-  const fmtSigned = (v) => (v > 0 ? "+" : "") + Math.round(v * 10) / 10;
 
   function setVisible(v) {
     st.on = v;
@@ -287,7 +242,6 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
         for (let i = 0; i < HEAT_K; i++) { const [gi, d] = near[i] || [dummy, R]; props["g" + i] = gi; props["d" + i] = d; }
         return { type: "Feature", geometry: f.geometry, properties: props };
       }) });
-      has26 = g.features.some((f) => f.properties.c26_all != null);
       repaint();
     })
     .catch((err) => console.error("[counts] failed to load:", err));

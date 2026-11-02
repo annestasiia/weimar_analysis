@@ -658,17 +658,19 @@
         "name": "Counting gates",
         "items": [
           {
-            "name": "Counting gates",
+            "name": "Base counting points",
             "layers": [
-              "weimar_counting_gates",
-              "weimar_counting_gates_2025"
+              "weimar_counting_points_2016",
+              "weimar_counting_points_2025",
+              "weimar_counting_points_2026"
             ]
           },
           {
-            "name": "Counting gates — labels",
+            "name": "Base counting points — labels",
             "layers": [
-              "weimar_counting_gates_labels",
-              "weimar_counting_gates_2025_labels"
+              "weimar_counting_points_2016_labels",
+              "weimar_counting_points_2025_labels",
+              "weimar_counting_points_2026_labels"
             ]
           }
         ]
@@ -3075,6 +3077,144 @@
       ]
     },
     {
+      "id": "weimar_counting_points_2016",
+      "name": "Base counting points 2016",
+      "description": "The 120 gates A1–U6 of 2016. Export: object name = gate, User Text Project No, Database No, 2016 Pedestrian (Workday 2, 16–17; 48 gates without that count take Workday 1, see 2016 Source).",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2016.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting gates: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "gateCard": true,
+      "rhinoLayer": "Base counting points",
+      "rhinoChild": "2016",
+      "style": {
+        "markerColor": "#c1121f",
+        "markerRadius": 2.33,
+        "markerStrokeWidth": 0.5
+      },
+      "subName": "2016 — Pedestrian"
+    },
+    {
+      "id": "weimar_counting_points_2016_labels",
+      "name": "Base counting points 2016 — labels",
+      "description": "Common gate names of this year's points.",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2016.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting gates: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "noExport": true,
+      "style": {
+        "labelField": "gate",
+        "labelColor": "#c1121f"
+      },
+      "interactive": false,
+      "subName": "2016 — Pedestrian"
+    },
+    {
+      "id": "weimar_counting_points_2025",
+      "name": "Base counting points 2025",
+      "description": "The 52 points of 2025 at the common gate positions. Export: object name = point number of the model, User Text Project No, Database No (gate name), 2025 Pedestrian, 2025 Vehicular (empty = not counted).",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2025.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting points 2025: Bauhaus-Universität Weimar (WS 2025/26)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "gateCard": true,
+      "rhinoLayer": "Base counting points",
+      "rhinoChild": "2025",
+      "style": {
+        "markerColor": "#0F5FB5",
+        "markerRadius": 2.33,
+        "markerStrokeWidth": 0.5
+      },
+      "subName": "2025 — Pedestrian & vehicular"
+    },
+    {
+      "id": "weimar_counting_points_2025_labels",
+      "name": "Base counting points 2025 — labels",
+      "description": "Common gate names of this year's points.",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2025.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting points 2025: Bauhaus-Universität Weimar (WS 2025/26)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "noExport": true,
+      "style": {
+        "labelField": "gate",
+        "labelColor": "#0F5FB5"
+      },
+      "interactive": false,
+      "subName": "2025 — Pedestrian & vehicular"
+    },
+    {
+      "id": "weimar_counting_points_2026",
+      "name": "Base counting points 2026",
+      "description": "The 19 points of 2026 at the common gate positions (11 existing gates, 8 new Z2–AA3). Export: object name = point number of the model, User Text Project No, Database No (gate name), 2026 Pedestrian, 2026 Vehicular.",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2026.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting points 2026: Bauhaus-Universität Weimar (WS 2026/27)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "gateCard": true,
+      "rhinoLayer": "Base counting points",
+      "rhinoChild": "2026",
+      "style": {
+        "markerColor": "#0D0D0D",
+        "markerRadius": 2.33,
+        "markerStrokeWidth": 0.5
+      },
+      "subName": "2026 — Pedestrian & vehicular"
+    },
+    {
+      "id": "weimar_counting_points_2026_labels",
+      "name": "Base counting points 2026 — labels",
+      "description": "Common gate names of this year's points.",
+      "resourceId": "teacher_ss",
+      "type": "geojson",
+      "url": "layers/data/weimar_counting_points_2026.geojson",
+      "visible": true,
+      "opacity": 1,
+      "attribution": "Counting points 2026: Bauhaus-Universität Weimar (WS 2026/27)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
+      "viewports": [
+        "space_syntax"
+      ],
+      "noExport": true,
+      "style": {
+        "labelField": "gate",
+        "labelColor": "#0D0D0D"
+      },
+      "interactive": false,
+      "subName": "2026 — Pedestrian & vehicular"
+    },
+    {
       "id": "weimar_counting_gates",
       "name": "Counting gates",
       "description": "120 pedestrian / cyclist counting gates (A1–U6) from the teacher's counting table, placed by its X/Y translated into EPSG:25832 (tools/build_counting_gates.py). Click a point for the counts.",
@@ -3085,9 +3225,7 @@
       "opacity": 1,
       "attribution": "Counting gates: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016)",
       "sourceDoc": "DATA_LOG.md#counting-gates",
-      "viewports": [
-        "space_syntax"
-      ],
+      "viewports": [],
       "gateCard": true,
       "style": {
         "markerColor": "#c1121f",
@@ -3114,9 +3252,7 @@
       "opacity": 1,
       "attribution": "Counting gates: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016)",
       "sourceDoc": "DATA_LOG.md#counting-gates",
-      "viewports": [
-        "space_syntax"
-      ],
+      "viewports": [],
       "style": {
         "labelField": "gate",
         "labelColor": "#c1121f"
@@ -3135,9 +3271,7 @@
       "opacity": 1,
       "attribution": "Counting points 2025: Bauhaus-Universität Weimar (WS 2025/26)",
       "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025",
-      "viewports": [
-        "space_syntax"
-      ],
+      "viewports": [],
       "gateCard": true,
       "style": {
         "markerColor": "#0F5FB5",
@@ -3164,9 +3298,7 @@
       "opacity": 1,
       "attribution": "Counting points 2025: Bauhaus-Universität Weimar (WS 2025/26)",
       "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025",
-      "viewports": [
-        "space_syntax"
-      ],
+      "viewports": [],
       "style": {
         "labelField": "gate",
         "labelColor": "#0F5FB5"
@@ -3177,7 +3309,7 @@
     {
       "id": "weimar_pedestrian_counts",
       "name": "Counting data 2016 / 2025 / 2026",
-      "description": "Pedestrian / cyclist counts under common gate names: 2016 at the 120 gates (3 days x 3 time slots, 15 min each; gaps filled from the other working day), 2025 at 52 points (peak hour of a working day, pedestrians and vehicles PER HOUR; 27 are 2016 gates, 25 new V1–Z1) and 2026 (working day, 17:00) once it exists. Switches under the sidebar row pick year / day / time / count; numbers over the gates, heat along the Space Syntax network (150 m), click a gate for its card. Built by tools/build_counting_register.py + tools/build_pedestrian_counts.py.",
+      "description": "Counts under common gate names, one view per year: 2016 Workday 2 · 16–17 · pedestrians (120 gates, 48 without that count take Workday 1), 2025 and 2026 Workday · 16–17 · pedestrians or vehicles per hour (52 and 19 points). Numbers over the gates, heat along the Space Syntax network (150 m), click a gate for its card. Built by tools/build_counting_register.py + tools/build_pedestrian_counts.py.",
       "resourceId": "teacher_ss",
       "type": "counts",
       "url": "layers/data/weimar_pedestrian_counts.geojson",
@@ -3188,8 +3320,8 @@
       "style": {
         "markerColor": "#EE5A14"
       },
-      "attribution": "Pedestrian counting: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016; WS 2025/26)",
-      "sourceDoc": "DATA_LOG.md#pedestrian-counting",
+      "attribution": "Pedestrian counting: Bauhaus-Universität Weimar, InfAR (Weimar 03-2016; WS 2025/26; WS 2026/27)",
+      "sourceDoc": "DATA_LOG.md#counting-gates-register-2016--2025--2026",
       "viewports": [
         "space_syntax"
       ]
