@@ -475,6 +475,36 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
   let selectPolyBtn = null, baseBorder2Btn = null, baseBorderCurveBtn = null;
   let formatRow = null, formatSel = null, originCb = null, exportBarEl = null;
   let terrainCb = null, placeCb = null, terrainStepSel = null;
+  // Terrain in the 3DM: a mesh layer and / or real heights for the geometry (web/terrain_export.js)
+  const terrainOptions = (noteText, placeFollowsTerrain) => {
+    const box = h("div", "export-terrain");
+    const check = (text, title) => {
+      const lab = h("label", "export-origin", { title });
+      const cb = h("input", null, { type: "checkbox" });
+      const s = h("span"); s.textContent = ` ${text}`;
+      lab.append(cb, s);
+      return [lab, cb];
+    };
+    const [terrainLab, tCb] = check("Terrain layer (mesh)", "Adds the layer Terrain: a mesh of the DGM over the export area, z = metres above sea level.");
+    const [placeLab, pCb] = check("Place on terrain", "Buildings stand on the lowest point of the terrain under them. Off = buildings start at z = 0, far below the Terrain layer.");
+    terrainCb = tCb; placeCb = pCb;
+    const stepLab = h("label", "export-origin", { hidden: true, title: "Grid step of the terrain. A finer grid follows the ground closer, the file gets about 4x heavier per halving." });
+    terrainStepSel = h("select", "export-format-sel", { title: "Terrain grid step" });
+    const cfg = manifest.terrainDem.exportGrid;
+    for (const step of Object.keys(cfg.grids)) {
+      const o = h("option", null, { value: step }); o.textContent = `Terrain grid: ${step} m`;
+      if (Number(step) === cfg.defaultStep) o.selected = true;
+      terrainStepSel.append(o);
+    }
+    stepLab.append(terrainStepSel);
+    const note = h("div", "tools-note", { hidden: true });
+    note.textContent = noteText;
+    const sync = () => { stepLab.hidden = !tCb.checked && !pCb.checked; note.hidden = !pCb.checked; };
+    tCb.addEventListener("change", () => { if (placeFollowsTerrain && tCb.checked) pCb.checked = true; sync(); });
+    pCb.addEventListener("change", sync);
+    box.append(terrainLab, placeLab, stepLab, note);
+    return box;
+  };
   if (withExport && exportMode !== "zone") {
     const exSec = h("div", "tools-section");
     const exLabel = h("div", "tools-label"); exLabel.textContent = "Export layers";
@@ -512,34 +542,9 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
     originLabel.append(originCb, originTxt);
     formatRow.append(formatSel, originLabel);
     // Terrain in the 3DM: a mesh layer and / or real heights for the geometry (web/terrain_export.js)
-    const terrainBox = h("div", "export-terrain", { hidden: true });
-    if (terrainExport) {
-      const check = (text, title) => {
-        const lab = h("label", "export-origin", { title });
-        const cb = h("input", null, { type: "checkbox" });
-        const s = h("span"); s.textContent = ` ${text}`;
-        lab.append(cb, s);
-        return [lab, cb];
-      };
-      const [terrainLab, tCb] = check("Terrain layer (mesh)", "Adds the layer Terrain: a mesh of the DGM over the export area, z = metres above sea level.");
-      const [placeLab, pCb] = check("Place on terrain", "Buildings and footprints stand on the lowest point of the terrain under their outline, other lines and points take its height. Off = everything at z = 0.");
-      terrainCb = tCb; placeCb = pCb;
-      const stepLab = h("label", "export-origin", { hidden: true, title: "Grid step of the terrain. A finer grid follows the ground closer, the file gets about 4x heavier per halving." });
-      terrainStepSel = h("select", "export-format-sel", { title: "Terrain grid step" });
-      const cfg = manifest.terrainDem.exportGrid;
-      for (const step of Object.keys(cfg.grids)) {
-        const o = h("option", null, { value: step }); o.textContent = `Terrain grid: ${step} m`;
-        if (Number(step) === cfg.defaultStep) o.selected = true;
-        terrainStepSel.append(o);
-      }
-      stepLab.append(terrainStepSel);
-      const note = h("div", "tools-note", { hidden: true });
-      note.textContent = "Parcels, other areas, Space Syntax and counting points stay at z = 0.";
-      const sync = () => { stepLab.hidden = !tCb.checked && !pCb.checked; note.hidden = !pCb.checked; };
-      tCb.addEventListener("change", sync); pCb.addEventListener("change", sync);
-      terrainBox.append(terrainLab, placeLab, stepLab, note);
-      formatRow.append(terrainBox);
-    }
+    const terrainBox = terrainExport ? terrainOptions("Parcels, other areas, Space Syntax and counting points stay at z = 0.") : h("div");
+    terrainBox.hidden = true;
+    formatRow.append(terrainBox);
     formatSel.addEventListener("change", () => { originLabel.hidden = formatSel.value !== "3dm"; terrainBox.hidden = formatSel.value !== "3dm"; });
     toolbar.append(formatRow, selectAreaBtn, selectPolyBtn, baseBorderBtn, baseBorder2Btn, baseBorderCurveBtn, exportRunBtn);
 
@@ -559,7 +564,8 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
     zoneExportBtn = h("button", "btn-export-run", { type: "button", disabled: true }); zoneExportBtn.textContent = "Export 3DM";
     zoneStatus = h("div", "map-export", { hidden: true });
     const zNote = h("div", "tools-note"); zNote.textContent = "Format: 3DM (Rhino). Buildings touching the zone turn red.";
-    zSec.append(zLabel, zoneBtn, zoneClearBtn, zoneExportBtn, zoneStatus, zNote);
+    const zTerrain = terrainExport ? terrainOptions("Parcels stay at z = 0.", true) : h("div");
+    zSec.append(zLabel, zoneBtn, zoneClearBtn, zTerrain, zoneExportBtn, zoneStatus, zNote);
     toolsBody.append(zSec);
   }
 
@@ -1378,7 +1384,9 @@ function _ringCurve(rhino, xy) {
   const pl = new rhino.Polyline(n + 1);
   for (let i = 0; i < n; i++) pl.add(xy[2 * i], xy[2 * i + 1], 0);
   pl.add(xy[0], xy[1], 0);
-  return pl.toPolylineCurve();
+  const curve = pl.toPolylineCurve();
+  pl.delete();
+  return curve;
 }
 
 /** Courtyards of an Extrusion. addInnerProfile() takes the profile plane's own coordinates: origin = first vertex of the outer ring, x along its first edge. */
@@ -2530,7 +2538,7 @@ function zoomForMinHeight(metres) {
 
 function createMapLibreBlock(mount, opts) {
   const { title, subtitle, viewport, basemap } = opts;
-  const ui = buildBlockChrome(mount, { title, subtitle, hostClass: "maplibre-host", withExport: true, exportMode: opts.exportMode, materials: opts.materials, terrainExport: terrainDemAllowed(viewport) && !!manifest.terrainDem.exportGrid });
+  const ui = buildBlockChrome(mount, { title, subtitle, hostClass: "maplibre-host", withExport: true, exportMode: opts.exportMode, materials: opts.materials, terrainExport: (opts.exportMode === "zone" || terrainDemAllowed(viewport)) && !!(manifest.terrainDem && manifest.terrainDem.exportGrid) });
   const baseAttribution = basemap?.attribution || BASE_ATTRIBUTION;
   // Either a full remote style URL (e.g. CARTO Positron's published vector
   // style — see its own comment above) or the plain OSM raster built inline.

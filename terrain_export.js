@@ -8,7 +8,9 @@
  */
 "use strict";
 
-const TERRAIN_EST = { bytesPerTriangle: 26, msPerTriangle: 0.04 };   // measured: 11 M triangles = 266 MB, 454 s
+// bytesPerTriangle is above the 25 B of the finished file on purpose: at 26 the whole city in LOD2 + terrain failed the read-back on part 4
+// (87 MB, cause not established; terrain alone passes at 26). msPerTriangle: 11 M triangles, 187-454 s.
+const TERRAIN_EST = { bytesPerTriangle: 40, msPerTriangle: 0.04 };
 const TERRAIN_TILE_CELLS = 500;     // cells per side of one Rhino mesh: large areas must fit into the 100 MB .3dm parts
 const _terrainGrids = new Map();
 
@@ -63,7 +65,14 @@ function terrainMinUnder(g, rings) {
   for (const ring of rings) {
     for (let k = 0; k < ring.length; k++) {
       const a = ring[k], b = ring[(k + 1) % ring.length];
-      for (const t of _meshCrossings(g, a, b)) take(terrainHeightAt(g, a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])));
+      // both sides of every crossing: next to a cell without data the crossing itself falls into that cell and reads as "no terrain"
+      const nudge = 1e-6 / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1);
+      for (const t of _meshCrossings(g, a, b)) {
+        for (const u of [t - nudge, t + nudge]) {
+          const c = Math.min(1, Math.max(0, u));
+          take(terrainHeightAt(g, a[0] + c * (b[0] - a[0]), a[1] + c * (b[1] - a[1])));
+        }
+      }
     }
   }
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -144,7 +153,9 @@ function terrainTileMesh(rhino, g, tile, ox, oy) {
     faces.addTriFace(sw, se, ne);
     faces.addTriFace(sw, ne, nw);
   }
-  mesh.normals().computeNormals();
+  const normals = mesh.normals();
+  normals.computeNormals();
   mesh.compact();
+  verts.delete(); faces.delete(); normals.delete();
   return mesh;
 }

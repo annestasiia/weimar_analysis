@@ -1,13 +1,14 @@
 /* Street Section Analysis — "Detailed Buildings" (WEGA LoD2 with roofs) + Export zone.
  *
  * Loaded before app.js; everything here is called from createMapLibreBlock() in app.js and uses its
- * globals (h, _toUtm32, loadRhino3dm, _polygonObject, triggerDownload, _downloadStamp, JSZip …) at call time.
+ * globals (h, _toUtm32, loadRhino3dm, _polygonObject, triggerDownload, _downloadStamp, JSZip, loadTerrainGrid …) at call time.
  *
  * Data: web/layers/data/weimar_detailed_buildings.{json,bin}, built by tools/extract_wega_buildings.py.
  * x, y = EPSG:3857 metres minus an anchor, z = metres above each building's lowest vertex.
  */
 "use strict";
 
+const LOD2_FLOOR_Z = 0.01;                 // a mesh triangle with all corners below this is the floor (every building has them)
 const LOD2_EST = { bytesPerTriangle: 72, msPerBuilding: 2 };   // 3DM size / build time of a building mesh, measured on the whole city
 const MERC_WORLD = 40075016.68557849;      // EPSG:3857 circumference, m
 const MERC_R = 6378137;
@@ -409,11 +410,17 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
 
       const list = [...selected];
       const buildingEst = (b) => (d.tab[b * 8 + 3] / 3) * LOD2_EST.bytesPerTriangle;
-      const estBytes = list.reduce((sum, b) => sum + buildingEst(b), 0) + parcelHits.length * EXPORT_3DM_EST.parcel.bytes;
+      // Terrain: the mesh layer and / or the base height of every building (web/terrain_export.js)
+      const wantTerrain = !!(ui.terrainCb && ui.terrainCb.checked), placeOn = !!(ui.placeCb && ui.placeCb.checked);
+      const grid = wantTerrain || placeOn ? await loadTerrainGrid(Number(ui.terrainStepSel.value)) : null;
+      const tiles = wantTerrain ? terrainTiles(grid, cs) : [];
+      const tileEst = (t) => t.cells.length * 2 * TERRAIN_EST.bytesPerTriangle;
+      const terrainCells = tiles.reduce((sum, t) => sum + t.cells.length, 0);
+      const estBytes = list.reduce((sum, b) => sum + buildingEst(b), 0) + parcelHits.length * EXPORT_3DM_EST.parcel.bytes + terrainCells * 2 * TERRAIN_EST.bytesPerTriangle;
       if (estBytes > EXPORT_3DM_PART_BYTES) {
-        const secs = (list.length * LOD2_EST.msPerBuilding + parcelHits.length * EXPORT_3DM_EST.parcel.ms) / 1000;
+        const secs = (list.length * LOD2_EST.msPerBuilding + parcelHits.length * EXPORT_3DM_EST.parcel.ms + terrainCells * 2 * TERRAIN_EST.msPerTriangle) / 1000;
         const ok = window.confirm(
-          `This zone holds ${list.length.toLocaleString()} buildings and ${parcelHits.length.toLocaleString()} parcels — about ${(estBytes / 1048576).toFixed(0)} MB (estimate), ` +
+          `This zone holds ${list.length.toLocaleString()} buildings and ${parcelHits.length.toLocaleString()} parcels${wantTerrain ? `, with the terrain at ${grid.step} m` : ""} — about ${(estBytes / 1048576).toFixed(0)} MB (estimate), ` +
           `split into about ${Math.ceil(estBytes / EXPORT_3DM_PART_BYTES)} .3dm files of up to ${EXPORT_3DM_PART_BYTES / 1048576} MB. It will take about ${Math.max(1, Math.round(secs / 60))} min to build.\n\n` +
           "OK = continue, Cancel = go back and draw a smaller zone.");
         if (!ok) { setStatus("Export cancelled — draw a smaller zone."); return; }
@@ -421,7 +428,7 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
 
       // Rhino document(s): rhino3dm.js damages a file over ~150 MB, so split at EXPORT_3DM_PART_BYTES (estimate) and read each part back
       const parts = [];          // { est, objects, bytes, file }
-      let doc = null, part = null, layB, layP, layZ;
+      let doc = null, part = null, layB, layP, layZ, layT;
       const newDoc = () => {
         doc = new rhino.File3dm();
         doc.settings().modelUnitSystem = rhino.UnitSystem.Meters;
@@ -430,6 +437,7 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
           doc.strings().set("crs", "EPSG:25832");
           doc.strings().set("originEasting", String(ox));
           doc.strings().set("originNorthing", String(oy));
+          if (grid) doc.strings().set("terrainStepM", String(grid.step));
         } catch (e) { /* optional */ }
         const mkLayer = (name, rgb) => {
           const l = new rhino.Layer(); l.name = name;
@@ -439,6 +447,7 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
         layB = mkLayer("Detailed Buildings", [40, 40, 40]);
         layP = mkLayer("Parcels", [120, 120, 120]);
         layZ = mkLayer("Export zone", [227, 38, 42]);
+        if (wantTerrain) layT = mkLayer("Terrain", [150, 130, 100]);
         part = { est: 0, objects: 0, bytes: null };
       };
       const finishDoc = async () => {
@@ -460,23 +469,37 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
       newDoc();
 
       // buildings -> meshes
-      let nTri = 0;
+      let nTri = 0, offTerrain = 0;
       for (let n = 0; n < list.length; n++) {
         const b = list[n];
         await reserve(buildingEst(b));
         const vs = d.tab[b * 8], vc = d.tab[b * 8 + 1], is = d.tab[b * 8 + 2], ic = d.tab[b * 8 + 3];
-        const mesh = new rhino.Mesh();
-        for (let v = vs; v < vs + vc; v++) {
-          const [e, nn] = proj4("EPSG:3857", "EPSG:25832", [d.pos[v * 3] + d.meta.anchor.mx, d.pos[v * 3 + 1] + d.meta.anchor.my]);
-          mesh.vertices().add(e - ox, nn - oy, d.pos[v * 3 + 2]);
+        const xy = new Array(vc);
+        for (let v = 0; v < vc; v++) xy[v] = proj4("EPSG:3857", "EPSG:25832", [d.pos[(vs + v) * 3] + d.meta.anchor.mx, d.pos[(vs + v) * 3 + 1] + d.meta.anchor.my]);
+        // Place on terrain: z of a mesh = metres above its lowest vertex, the floor triangles lie at 0 -> the floor goes on the lowest point of the terrain under it
+        let baseZ = null;
+        if (placeOn) {
+          for (let k = 0; k < ic; k += 3) {
+            const t0 = d.idx[is + k] - vs, t1 = d.idx[is + k + 1] - vs, t2 = d.idx[is + k + 2] - vs;
+            if (d.pos[(vs + t0) * 3 + 2] > LOD2_FLOOR_Z || d.pos[(vs + t1) * 3 + 2] > LOD2_FLOOR_Z || d.pos[(vs + t2) * 3 + 2] > LOD2_FLOOR_Z) continue;
+            const z = terrainMinUnder(grid, [[xy[t0], xy[t1], xy[t2]]]);
+            if (z !== null && (baseZ === null || z < baseZ)) baseZ = z;
+          }
+          if (baseZ === null) offTerrain++;
         }
-        for (let k = 0; k < ic; k += 3) mesh.faces().addTriFace(d.idx[is + k] - vs, d.idx[is + k + 1] - vs, d.idx[is + k + 2] - vs);
-        mesh.normals().computeNormals(); mesh.compact();
+        const mesh = new rhino.Mesh();
+        // one wrapper per list, freed below: mesh.vertices() in the loop leaks a WASM object per vertex
+        const verts = mesh.vertices(), faces = mesh.faces(), normals = mesh.normals();
+        for (let v = 0; v < vc; v++) verts.add(xy[v][0] - ox, xy[v][1] - oy, d.pos[(vs + v) * 3 + 2] + (baseZ === null ? 0 : baseZ));
+        for (let k = 0; k < ic; k += 3) faces.addTriFace(d.idx[is + k] - vs, d.idx[is + k + 1] - vs, d.idx[is + k + 2] - vs);
+        normals.computeNormals(); mesh.compact();
+        verts.delete(); faces.delete(); normals.delete();
         const a = new rhino.ObjectAttributes();
         a.layerIndex = layB; a.name = d.meta.ids[b];
         a.setUserString("buildingId", d.meta.ids[b]);
         a.setUserString("height", d.height[b].toFixed(2));
         a.setUserString("baseZ_ellipsoidal", d.basez[b].toFixed(2));
+        if (baseZ !== null) a.setUserString("baseZ", baseZ.toFixed(2));
         doc.objects().add(mesh, a);
         mesh.delete(); a.delete();     // the document keeps its own copy; a large zone would run out of WASM memory otherwise
         nTri += ic / 3;
@@ -501,6 +524,19 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
         if (n % 250 === 0) { setStatus(`Parcels… ${n.toLocaleString()} / ${parcelHits.length.toLocaleString()}`); await _tick(); }
       }
 
+      // terrain mesh
+      for (let n = 0; n < tiles.length; n++) {
+        await reserve(tileEst(tiles[n]));
+        setStatus(`Terrain mesh ${n + 1} / ${tiles.length}…`); await _tick();
+        const mesh = terrainTileMesh(rhino, grid, tiles[n], ox, oy);
+        const a = new rhino.ObjectAttributes();
+        a.layerIndex = layT; a.name = `Terrain ${tiles[n].key}`;
+        a.setUserString("stepM", String(grid.step));
+        a.setUserString("zUnit", "metres above sea level");
+        doc.objects().add(mesh, a);
+        mesh.delete(); a.delete();
+      }
+
       // zone outline
       const pl = new rhino.Polyline(zone.length + 1);
       for (const c of [...cs, cs[0]]) pl.add(c[0] - ox, c[1] - oy, 0);
@@ -523,7 +559,12 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
         generated, viewport, format: "3dm (rhino3dm.js 8.4.0)", crs: "EPSG:25832", units: "Meters",
         files: parts.map((q) => ({ file: q.file, objectCount: q.objects, bytes: q.bytes.length })),
         filesNote: parts.length === 1 ? undefined : splitNote,
-        origin: { originEasting: ox, originNorthing: oy, note: "coordinates in the file = EPSG:25832 minus (E, N); z = metres above each building's lowest point" },
+        origin: { originEasting: ox, originNorthing: oy, note: placeOn
+          ? "coordinates in the file = EPSG:25832 minus (E, N); z = metres above sea level, buildings outside the terrain start at z = 0"
+          : "coordinates in the file = EPSG:25832 minus (E, N); z = metres above each building's lowest point" },
+        terrain: grid ? { stepM: grid.step, layer: wantTerrain, placeOnTerrain: placeOn, triangles: terrainCells * 2, offTerrain,
+          rule: "floor of a building = lowest point of the terrain mesh under it (User Text baseZ); parcels and the zone outline stay at z = 0",
+          coverage: "the DGM ends at E 667000: the east of the city has no terrain" } : undefined,
         zone: { areaKm2: Number(area.toFixed(4)), polygonLngLat: zone },
         selectionRule: "every building mesh that overlaps the zone, even partly, is exported whole",
         layers: { "Detailed Buildings": { objects: list.length, triangles: nTri, geometry: "triangle mesh (WEGA LoD2 with roofs)" },
@@ -535,11 +576,12 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
         ...(parts.length > 1 ? [splitNote] : []),
         "", "Detailed Buildings: © GDI-Th, WEGA 3D-Gebäudemodelle LoD2, Datenlizenz Deutschland – Namensnennung 2.0",
         "Parcels: © GDI-Th, ALKIS, Datenlizenz Deutschland – Namensnennung 2.0",
+        ...(grid ? [`Terrain, ${grid.step} m grid: ${manifest.terrainDem.attribution}`] : []),
       ].join("\n"));
       setStatus("Packing zip…"); await _tick();
       const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
       triggerDownload(blob, `weimar_street_section_zone_${_downloadStamp()}.zip`);
-      setStatus(`Downloaded: ${list.length.toLocaleString()} buildings, ${nParcels} parcels · ${(totalBytes / 1048576).toFixed(1)} MB .3dm${parts.length > 1 ? ` in ${parts.length} files — open part 1, then Import the others` : ""} · ${((performance.now() - t0) / 1000).toFixed(1)} s · local origin E ${ox} / N ${oy}`);
+      setStatus(`Downloaded: ${list.length.toLocaleString()} buildings, ${nParcels} parcels · ${(totalBytes / 1048576).toFixed(1)} MB .3dm${parts.length > 1 ? ` in ${parts.length} files — open part 1, then Import the others` : ""}${offTerrain ? ` · ⚠ ${offTerrain.toLocaleString()} buildings outside the terrain stay at z = 0` : ""} · ${((performance.now() - t0) / 1000).toFixed(1)} s · local origin E ${ox} / N ${oy}`);
     } catch (err) {
       console.error("[zone export] failed:", err);
       setStatus(`Export failed: ${err.message}`, true);
