@@ -4,8 +4,8 @@
  * type "counts" and uses app.js globals (h, resolveUrl) at call time.
  *
  * Data (tools/build_pedestrian_counts.py):
- *   config.url      one Point per gate (all years, common names), keys c16_WD2_PM_all (2016, per 15 min) and the other 2016 slots,
- *                   c25_all / c25_veh, c26_all / c26_veh (PER HOUR), point2025 / point2026 (number in the model), years "2016, 2025"
+ *   config.url      one Point per gate (all years, common names), keys c16_WD2_PM_all (2016) and the other 2016 slots,
+ *                   c25_all / c25_veh, c26_all / c26_veh, all PER HOUR, point2025 / point2026 (number in the model), years "2016, 2025"
  *   config.heatUrl  short network pieces, `g` = "gateIndex:metres,…" within the FC's heatRadius
  *
  * The heat geometry is loaded once; each piece keeps its HEAT_K nearest gates (g0..g2 / d0..d2) and a switch only
@@ -18,8 +18,7 @@ const COUNT_KEY_2016 = "c16_WD2_PM_all";
 const COUNT_YEARS = ["2016", "2025", "2026"];
 const COUNT_MEASURES = [["all", "Pedestrians"], ["veh", "Vehicles"]];
 const COUNT_RAMP = ["#FFF1A8", "#FFD500", "#F7A21B", "#EE5A14", "#E3262A", "#8C1018"];
-const COUNT_BREAKS = { all: [0, 10, 25, 60, 150, 350] };                                       // 2016, per 15 min
-const HOUR_BREAKS = { all: [0, 50, 100, 200, 400, 800], veh: [0, 50, 150, 300, 600, 1200] };   // 2025 / 2026, per hour
+const HOUR_BREAKS = { all: [0, 50, 100, 200, 400, 800], veh: [0, 50, 150, 300, 600, 1200] };   // per hour, one scale for all years
 const COUNT_NO_DATA = "#FFFFFF";
 const HEAT_K = 3;   // gates mixed per heat piece (nearest first)
 
@@ -35,7 +34,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
   // ---------------------------------------------------------------- value of a gate for the current selection
   const lookup = (p, year = st.year, measure = st.measure) =>
     (year === "2016" ? p[COUNT_KEY_2016] : p[`c${year.slice(2)}_${measure}`]) ?? null;
-  const breaks = () => (st.year === "2016" ? COUNT_BREAKS : HOUR_BREAKS)[st.measure];
+  const breaks = () => HOUR_BREAKS[st.measure];
   const colorExpr = (get) => {
     const br = breaks(), ramp = COUNT_RAMP;
     return ["case", ["==", ["typeof", get], "number"],
@@ -150,7 +149,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
       lab.append(cb, s); show.append(lab);
     }
     const n = h("div", "cnt-note");
-    n.textContent = st.year === "2016" ? "2016 · Workday 2 · 16–17 · per 15 min, not per hour. 48 gates without that count show Workday 1."
+    n.textContent = st.year === "2016" ? "2016 · Workday 2 · 16–17 · per hour (15-min count × 4). 48 gates without that count show Workday 1."
       : `${st.year} · Workday · 16–17 · per hour.`;
     controls.append(show, legendBar(), n);
   }
@@ -162,8 +161,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
     const ticks = h("div", "cnt-legend-ticks");
     for (const b of br) { const t = h("span"); t.textContent = b + (b === br[br.length - 1] ? "+" : ""); ticks.append(t); }
     const cap = h("div", "cnt-note");
-    cap.textContent = st.year === "2016" ? "People crossing the gate in 15 min · white = no count"
-      : `${st.measure === "veh" ? "Vehicles" : "People"} per hour · white = not counted`;
+    cap.textContent = `${st.measure === "veh" ? "Vehicles" : "People"} per hour · white = not counted`;
     wrap.append(bar, ticks, cap);
     return wrap;
   }
@@ -190,7 +188,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
     const bigV = h("span", "cnt-big-v"); bigV.textContent = fmt(cur);
     const bigT = h("span", "cnt-big-t");
     const mName = COUNT_MEASURES.find((m) => m[0] === st.measure)[1];
-    bigT.textContent = `${st.year} · Workday · 16–17 · ${mName}${st.year === "2016" ? " / 15 min" : " / h"}`
+    bigT.textContent = `${st.year} · Workday · 16–17 · ${mName} / h`
       + (cur != null ? ` · rank ${vals.indexOf(cur) + 1} of ${vals.length}` : "");
     big.append(bigV, bigT);
     card.append(big);
@@ -215,7 +213,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
       t.append(tr);
     }
     const note = h("div", "tools-note");
-    note.textContent = "Workday, 16–17. 2016: people crossing the gate in 15 min, Workday 2. * = Workday 1, no Workday 2 count here. 2025, 2026: per hour. – = no count.";
+    note.textContent = "Workday, 16–17, per hour. 2016: Workday 2, 15-min count × 4. * = Workday 1, no Workday 2 count here. – = no count.";
     card.append(t, note);
     card.hidden = false;
     if (prev !== name) repaint();

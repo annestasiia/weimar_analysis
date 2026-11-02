@@ -3079,7 +3079,7 @@
     {
       "id": "weimar_counting_points_2016",
       "name": "Base counting points 2016",
-      "description": "The 120 gates A1–U6 of 2016. Export: object name = gate, User Text Project No, Database No, 2016 Pedestrian (Workday 2, 16–17; 48 gates without that count take Workday 1, see 2016 Source).",
+      "description": "The 120 gates A1–U6 of 2016. Export: object name = gate, User Text Project No, Database No, 2016 Pedestrian (per hour = 15-min count × 4, Workday 2, 16–17; 48 gates without that count take Workday 1, see 2016 Source).",
       "resourceId": "teacher_ss",
       "type": "geojson",
       "url": "layers/data/weimar_counting_points_2016.geojson",
@@ -3309,7 +3309,7 @@
     {
       "id": "weimar_pedestrian_counts",
       "name": "Counting data 2016 / 2025 / 2026",
-      "description": "Counts under common gate names, one view per year: 2016 Workday 2 · 16–17 · pedestrians (120 gates, 48 without that count take Workday 1), 2025 and 2026 Workday · 16–17 · pedestrians or vehicles per hour (52 and 19 points). Numbers over the gates, heat along the Space Syntax network (150 m), click a gate for its card. Built by tools/build_counting_register.py + tools/build_pedestrian_counts.py.",
+      "description": "Counts under common gate names, one view per year: 2016 Workday 2 · 16–17 · pedestrians per hour = 15-min count × 4 (120 gates, 48 without that count take Workday 1), 2025 and 2026 Workday · 16–17 · pedestrians or vehicles per hour (52 and 19 points). Numbers over the gates, heat along the Space Syntax network (150 m), click a gate for its card. Built by tools/build_counting_register.py + tools/build_pedestrian_counts.py.",
       "resourceId": "teacher_ss",
       "type": "counts",
       "url": "layers/data/weimar_pedestrian_counts.geojson",
