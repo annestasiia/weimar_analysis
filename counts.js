@@ -5,7 +5,7 @@
  *
  * Data (tools/build_pedestrian_counts.py):
  *   config.url      one Point per gate (all years, common names), keys c16_WD2_PM_all (2016) and the other 2016 slots,
- *                   c25_all / c25_veh, c26_all / c26_veh, all PER HOUR, point2025 / point2026 (number in the model), years "2016, 2025"
+ *                   c25_all / c25_veh, c26_all / c26_veh, all PER HOUR, point2016 / point2025 / point2026 (number of the point in that year), years "2016, 2025"
  *   config.heatUrl  short network pieces, `g` = "gateIndex:metres,…" within the FC's heatRadius
  *
  * The heat geometry is loaded once; each piece keeps its HEAT_K nearest gates (g0..g2 / d0..d2) and a switch only
@@ -203,7 +203,7 @@ function createPedestrianCounts(map, config, { visible, toolsBody }) {
       const on = yearsOf(p).includes(y);
       const tr = h("tr");
       const th = h("th"); th.textContent = y; tr.append(th);
-      const cells = [on ? (y === "2016" ? name : p[`point${y}`] ?? "–") : "–", on ? fmt(lookup(p, y, "all")) : "–", on && y !== "2016" ? fmt(lookup(p, y, "veh")) : "–"];
+      const cells = [on ? p[`point${y}`] ?? "–" : "–", on ? fmt(lookup(p, y, "all")) : "–", on && y !== "2016" ? fmt(lookup(p, y, "veh")) : "–"];
       cells.forEach((c, i) => {
         const td = h("td"); td.textContent = String(c);
         if (y === "2016" && i === 1 && in16Filled && on) { td.classList.add("filled"); td.textContent += "*"; td.title = "Workday 1: no Workday 2 count at this gate"; }

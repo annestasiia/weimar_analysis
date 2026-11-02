@@ -3079,7 +3079,7 @@
     {
       "id": "weimar_counting_points_2016",
       "name": "Base counting points 2016",
-      "description": "The 120 gates A1–U6 of 2016. Export: object name = gate, User Text Project No, Database No, 2016 Pedestrian (per hour = 15-min count × 4, Workday 2, 16–17; 48 gates without that count take Workday 1, see 2016 Source).",
+      "description": "The 120 gates A1–U6 of 2016. Export: object name = number 1–120 (table order, A1 = 1), User Text Project No, Database No (gate name), 2016 Pedestrian (per hour = 15-min count × 4, Workday 2, 16–17; 48 gates without that count take Workday 1, see 2016 Source).",
       "resourceId": "teacher_ss",
       "type": "geojson",
       "url": "layers/data/weimar_counting_points_2016.geojson",
