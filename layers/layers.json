@@ -76,11 +76,6 @@
       "noData": 65535,
       "defaultStep": 10,
       "grids": {
-        "5": {
-          "url": "terrain/export/weimar_dgm_5m.bin",
-          "cols": 2041,
-          "rows": 2765
-        },
         "10": {
           "url": "terrain/export/weimar_dgm_10m.bin",
           "cols": 1021,
