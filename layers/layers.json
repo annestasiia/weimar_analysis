@@ -68,7 +68,31 @@
       "space_syntax"
     ],
     "attribution": "© GDI-Th (TLVermGeo), Datenlizenz Deutschland – Namensnennung 2.0",
-    "note": "Real elevation as a MapLibre raster-dem source — Terrarium-encoded PNG tiles built from the Thuringia DGM1 (1 m airborne-laserscanning DTM, vintage 2014-2019) by tools/build_dgm_terrain.py. Static tiles under web/terrain/weimar-dgm/. Canonical DEM for Grasshopper: data/processed/dgm_weimar/weimar_dgm_25832.tif. TASK 10 — Blue-green Infrastructure; re-added to Weimar Model in TASK 15 (that viewport is MapLibre again, so it uses this raster-dem terrain like Blue-green, not the WEGA quantized-mesh one). Covers 145 of 178 AOI tiles (eastern strip not yet downloaded)."
+    "note": "Real elevation as a MapLibre raster-dem source — Terrarium-encoded PNG tiles built from the Thuringia DGM1 (1 m airborne-laserscanning DTM, vintage 2014-2019) by tools/build_dgm_terrain.py. Static tiles under web/terrain/weimar-dgm/. Canonical DEM for Grasshopper: data/processed/dgm_weimar/weimar_dgm_25832.tif. TASK 10 — Blue-green Infrastructure; re-added to Weimar Model in TASK 15 (that viewport is MapLibre again, so it uses this raster-dem terrain like Blue-green, not the WEGA quantized-mesh one). Covers 145 of 178 AOI tiles (eastern strip not yet downloaded).",
+    "exportGrid": {
+      "note": "Elevation grids for the 3DM export (Terrain layer, Place on terrain), built by tools/build_dgm_export_grids.py",
+      "ulx": 656797.5,
+      "uly": 5656768.5,
+      "noData": 65535,
+      "defaultStep": 10,
+      "grids": {
+        "5": {
+          "url": "terrain/export/weimar_dgm_5m.bin",
+          "cols": 2041,
+          "rows": 2765
+        },
+        "10": {
+          "url": "terrain/export/weimar_dgm_10m.bin",
+          "cols": 1021,
+          "rows": 1383
+        },
+        "15": {
+          "url": "terrain/export/weimar_dgm_15m.bin",
+          "cols": 681,
+          "rows": 922
+        }
+      }
+    }
   },
   "useCategories": [
     {

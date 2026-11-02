@@ -417,7 +417,8 @@ a.group-title:hover { color: var(--accent); text-decoration: underline; }
 
 /* ---------- Export format switch (TASK 28) ---------- */
 .export-format { display: flex; flex-direction: column; gap: 4px; }
-.export-format[hidden], .export-origin[hidden] { display: none; }
+.export-format[hidden], .export-origin[hidden], .export-terrain[hidden] { display: none; }
+.export-terrain { display: flex; flex-direction: column; gap: 4px; }
 .export-format-sel {
   width: 100%; padding: 6px 8px; font-size: 12px; font-weight: 700;
   background: var(--bg-panel-2); color: var(--text);

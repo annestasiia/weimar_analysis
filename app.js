@@ -445,7 +445,7 @@ function terrainDemAllowed(viewport) {
  * Builds the block <section> with map host, title, sidebar, view controls and
  * attribution strip, appends it to `mount`, and returns the useful refs.
  */
-function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, exportMode, materials }) {
+function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, exportMode, materials, terrainExport }) {
   // Three-column layout: layers (left) | map (centre) | tools (right).
   const section = h("section", "map-block");
   const host = h("div", hostClass);
@@ -474,6 +474,7 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
   let exportToggleBtn = null, selectAreaBtn = null, exportRunBtn = null, baseBorderBtn = null;
   let selectPolyBtn = null, baseBorder2Btn = null, baseBorderCurveBtn = null;
   let formatRow = null, formatSel = null, originCb = null, exportBarEl = null;
+  let terrainCb = null, placeCb = null, terrainStepSel = null;
   if (withExport && exportMode !== "zone") {
     const exSec = h("div", "tools-section");
     const exLabel = h("div", "tools-label"); exLabel.textContent = "Export layers";
@@ -510,7 +511,36 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
     const originTxt = h("span"); originTxt.textContent = " local origin (small coordinates)";
     originLabel.append(originCb, originTxt);
     formatRow.append(formatSel, originLabel);
-    formatSel.addEventListener("change", () => { originLabel.hidden = formatSel.value !== "3dm"; });
+    // Terrain in the 3DM: a mesh layer and / or real heights for the geometry (web/terrain_export.js)
+    const terrainBox = h("div", "export-terrain", { hidden: true });
+    if (terrainExport) {
+      const check = (text, title) => {
+        const lab = h("label", "export-origin", { title });
+        const cb = h("input", null, { type: "checkbox" });
+        const s = h("span"); s.textContent = ` ${text}`;
+        lab.append(cb, s);
+        return [lab, cb];
+      };
+      const [terrainLab, tCb] = check("Terrain layer (mesh)", "Adds the layer Terrain: a mesh of the DGM over the export area, z = metres above sea level.");
+      const [placeLab, pCb] = check("Place on terrain", "Buildings and footprints stand on the lowest point of the terrain under their outline, other lines and points take its height. Off = everything at z = 0.");
+      terrainCb = tCb; placeCb = pCb;
+      const stepLab = h("label", "export-origin", { hidden: true, title: "Grid step of the terrain. A finer grid follows the ground closer, the file gets about 4x heavier per halving." });
+      terrainStepSel = h("select", "export-format-sel", { title: "Terrain grid step" });
+      const cfg = manifest.terrainDem.exportGrid;
+      for (const step of Object.keys(cfg.grids)) {
+        const o = h("option", null, { value: step }); o.textContent = `Terrain grid: ${step} m`;
+        if (Number(step) === cfg.defaultStep) o.selected = true;
+        terrainStepSel.append(o);
+      }
+      stepLab.append(terrainStepSel);
+      const note = h("div", "tools-note", { hidden: true });
+      note.textContent = "Parcels, other areas, Space Syntax and counting points stay at z = 0.";
+      const sync = () => { stepLab.hidden = !tCb.checked && !pCb.checked; note.hidden = !pCb.checked; };
+      tCb.addEventListener("change", sync); pCb.addEventListener("change", sync);
+      terrainBox.append(terrainLab, placeLab, stepLab, note);
+      formatRow.append(terrainBox);
+    }
+    formatSel.addEventListener("change", () => { originLabel.hidden = formatSel.value !== "3dm"; terrainBox.hidden = formatSel.value !== "3dm"; });
     toolbar.append(formatRow, selectAreaBtn, selectPolyBtn, baseBorderBtn, baseBorder2Btn, baseBorderCurveBtn, exportRunBtn);
 
     // Progress / warning line — hidden until it has something to say.
@@ -602,7 +632,7 @@ function buildBlockChrome(mount, { title, subtitle, hostClass, withExport, expor
   return {
     section, host, groupsEl, toolsBody, viewSwitch, btn2d, btn3d, terrainBtn, attributionEl, legendEl, metaEl,
     exportToggleBtn, selectAreaBtn, selectPolyBtn, baseBorderBtn, baseBorder2Btn, baseBorderCurveBtn, exportRunBtn, exportBarEl,
-    formatRow, formatSel, originCb, pngBtn, pdfBtn, gridBtn, gridNote, annotBtn, annotCheck,
+    formatRow, formatSel, originCb, terrainCb, placeCb, terrainStepSel, pngBtn, pdfBtn, gridBtn, gridNote, annotBtn, annotCheck,
     zoneBtn, zoneClearBtn, zoneExportBtn, zoneStatus, gridCanvas, gridScaleEl,
   };
 }
@@ -1351,6 +1381,26 @@ function _ringCurve(rhino, xy) {
   return pl.toPolylineCurve();
 }
 
+/** Courtyards of an Extrusion. addInnerProfile() takes the profile plane's own coordinates: origin = first vertex of the outer ring, x along its first edge. */
+function _addHoles(rhino, ex, outer, holes) {
+  const sx = outer[0], sy = outer[1], len = Math.hypot(outer[2] - sx, outer[3] - sy);
+  const ux = (outer[2] - sx) / len, uy = (outer[3] - sy) / len;
+  for (const h of holes) {
+    const local = new Array(h.length);
+    for (let i = 0; i < h.length; i += 2) {
+      const dx = h[i] - sx, dy = h[i + 1] - sy;
+      local[i] = dx * ux + dy * uy; local[i + 1] = -dx * uy + dy * ux;
+    }
+    if (!ex.addInnerProfile(_ringCurve(rhino, local))) return false;
+    // read it back: the courtyard must be where it was asked for
+    const bb = ex.profile3d(ex.profileCount - 1, 0).getBoundingBox();
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < h.length; i += 2) { x0 = Math.min(x0, h[i]); x1 = Math.max(x1, h[i]); y0 = Math.min(y0, h[i + 1]); y1 = Math.max(y1, h[i + 1]); }
+    if (Math.max(Math.abs(bb.min[0] - x0), Math.abs(bb.max[0] - x1), Math.abs(bb.min[1] - y0), Math.abs(bb.max[1] - y1)) > 0.001) return false;
+  }
+  return true;
+}
+
 /**
  * Polygon (outer + holes, GeoJSON rings) -> native Rhino geometry.
  *   height > 0 : Extrusion (closed solid, z 0..height; holes = inner profiles)
@@ -1372,7 +1422,7 @@ function _polygonObject(rhino, rings, height, ox, oy) {
   if (height > 0) {
     const ex = rhino.Extrusion.create(_ringCurve(rhino, rs[0]), height, true);
     if (!ex) return { skip: "extrusion failed" };
-    for (const h of holes) if (!ex.addInnerProfile(_ringCurve(rhino, h))) return { skip: "inner profile rejected" };
+    if (!_addHoles(rhino, ex, rs[0], holes)) return { skip: "inner profile rejected" };
     return { geom: ex, kind: "extrusion" };
   }
   if (!holes.length) {
@@ -1382,7 +1432,7 @@ function _polygonObject(rhino, rings, height, ox, oy) {
   // holes: bottom cap (z = 0) of a thin capped extrusion = one planar face with inner loops
   const ex = rhino.Extrusion.create(_ringCurve(rhino, rs[0]), 1, true);
   if (!ex) return { skip: "extrusion failed" };
-  for (const h of holes) if (!ex.addInnerProfile(_ringCurve(rhino, h))) return { skip: "inner profile rejected" };
+  if (!_addHoles(rhino, ex, rs[0], holes)) return { skip: "inner profile rejected" };
   const brep = ex.toBrep(true), F = brep.faces();
   for (let i = 0; i < F.count; i++) {
     const face = F.get(i), d = face.duplicateFace(false), bb = d.getBoundingBox();
@@ -1455,6 +1505,15 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     }
     return { name: c.group.name, objects: objs, bytes, ms };
   });
+  // Terrain: the mesh tiles of the export area and / or the heights for "Place on terrain"
+  const wantTerrain = !!opts.terrainLayer, placeOn = !!opts.placeOnTerrain;
+  const grid = wantTerrain || placeOn ? await loadTerrainGrid(opts.terrainStep) : null;
+  const terrainTileList = wantTerrain ? terrainTiles(grid, _selectionRing(selection).map(([lng, lat]) => _toUtm32(lng, lat))) : [];
+  const tileBytes = (t) => t.cells.length * 2 * TERRAIN_EST.bytesPerTriangle;
+  if (wantTerrain) {
+    const cells = terrainTileList.reduce((a, t) => a + t.cells.length, 0);
+    breakdown.push({ name: `Terrain (${opts.terrainStep} m)`, objects: terrainTileList.length, bytes: cells * 2 * TERRAIN_EST.bytesPerTriangle, ms: cells * 2 * TERRAIN_EST.msPerTriangle });
+  }
   const totalObjects = breakdown.reduce((a, r) => a + r.objects, 0);
   const estBytes = breakdown.reduce((a, r) => a + r.bytes, 0);
   const estSecs = breakdown.reduce((a, r) => a + r.ms, 0) / 1000;
@@ -1462,7 +1521,7 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     `This selection holds ${info.totalObjects.toLocaleString()} Rhino objects — the 3DM will take about ${Math.round(info.estSecs)} s to build and be about ${(info.estBytes / 1048576).toFixed(0)} MB (estimate).\n\n` +
     info.breakdown.map((r) => `  ${r.name}: ${r.objects.toLocaleString()}`).join("\n") +
     "\n\nOK = continue, Cancel = go back and pick a smaller area."));
-  if (totalObjects > EXPORT_3DM_WARN_OBJECTS && !confirmLarge({ totalObjects, estBytes, estSecs, breakdown })) return null;
+  if ((totalObjects > EXPORT_3DM_WARN_OBJECTS || estBytes > EXPORT_3DM_PART_BYTES) && !confirmLarge({ totalObjects, estBytes, estSecs, breakdown })) return null;
 
   // 2. local origin (optional)
   const sw = _toUtm32(selection.west, selection.south), ne = _toUtm32(selection.east, selection.north);
@@ -1482,6 +1541,7 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
       doc.strings().set("crs", "EPSG:25832");
       doc.strings().set("originEasting", String(ox));
       doc.strings().set("originNorthing", String(oy));
+      if (grid) doc.strings().set("terrainStepM", String(grid.step));
     } catch (e) { console.warn("[3dm] document strings not written:", e.message); }
     part = { est: 0, objects: 0, layers: new Set(), bytes: null };
   };
@@ -1537,6 +1597,8 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     const isP = layerMetas.some((m) => _isParcelLayer(m.layer));
     // Parent layer + one child per category (always all of them, so the Layers panel looks the same for any
     // selection; empty categories stay empty). Child names are not in usedNames: Rhino only needs them unique per parent.
+    const placePoly = placeOn && (isF || isB);                     // flat polygons (parcels, land cover ...) stay at z = 0
+    const placeRest = placeOn && !isS && !isC;                     // Space Syntax and its counting points are flat graphs
     const useCats = isC ? cntMetas.map((m) => ({ name: m.layer.rhinoChild, color: m.layer.style && m.layer.style.markerColor }))
       : manifest[(useMeta && useMeta.layer.colorBy.palette) || "useCategories"] || [];
     // (re)created in every part this group spills into, with the same names
@@ -1556,18 +1618,19 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
       curLayerIdx = lay.idx;
     };
     setupLayers();
-    const st = { name: layName, features: mergedFeatures.length, objects: 0, flatNoHeight: 0, skipped: 0, skippedIds: [], types: {},
+    const st = { name: layName, features: mergedFeatures.length, objects: 0, flatNoHeight: 0, skipped: 0, skippedIds: [], types: {}, offTerrain: 0,
       children: isU || isC ? Object.fromEntries(useCats.map((c) => [c.name, 0])) : undefined,
       kind: isC ? "counting_points" : isU ? (isF ? "footprints_by_use" : isP ? "parcels_by_use" : "buildings_by_use") : isS ? "spacesyntax" : isF ? "footprints" : isB ? "buildings" : isP ? "parcels" : "generic" };
     const keys = isC ? ["Project No", "Database No", "2016 Pedestrian", "2016 Source", "2025 Pedestrian", "2025 Vehicular", "2026 Pedestrian", "2026 Vehicular"]
       : isS ? ["ssId", "network", "pathType", "length", "srcClass"] : isF ? ["usage", "useCategory", "height", "floors", "buildingId", "area", "areaSource"] : isB ? ["usage", "useCategory", "height", "floors", "buildingId", "eaveHeight", "ridgeHeight", "roofType", "heightWithAttic", "atticFloorLikely"] : isP ? ["usage", "useCategory", "area", "areaSource"] : null;
 
-    const attrFor = (f, name) => {
+    const attrFor = (f, name, baseZ) => {
       const a = new rhino.ObjectAttributes();
       a.layerIndex = curLayerIdx;
       if (name) a.name = String(name);
       const us = _userStrings(f.properties, keys);
       for (const k in us) a.setUserString(k, us[k]);
+      if (baseZ !== undefined) a.setUserString("baseZ", baseZ.toFixed(2));
       return a;
     };
     const nameOf = (f) => {
@@ -1604,7 +1667,13 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
               if (st.skippedIds.length < 500) st.skippedIds.push({ id: nm || null, reason: r.skip });
               continue;
             }
-            doc.objects().add(r.geom, attrFor(f, nm)); st.objects++;
+            let baseZ;
+            if (placePoly) {
+              const z = terrainMinUnder(grid, rings.map((ring) => ring.map(([lng, lat]) => _toUtm32(lng, lat))));
+              if (z === null) st.offTerrain++;
+              else { baseZ = z; r.geom.transform(rhino.Transform.translationXYZ(0, 0, z)); }
+            }
+            doc.objects().add(r.geom, attrFor(f, nm, baseZ)); st.objects++;
             if (cat) st.children[cat]++;
             st.types[r.kind] = (st.types[r.kind] || 0) + 1;
           }
@@ -1617,15 +1686,20 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
               doc.objects().addCurve(new rhino.LineCurve([a[0] - ox, a[1] - oy, 0], [b[0] - ox, b[1] - oy, 0]), attrFor(f, nm));
               st.objects++; st.types.line = (st.types.line || 0) + 1; continue;
             }
-            const pl = new rhino.Polyline(ln.length);
-            for (const [lng, lat] of ln) { const [e, n] = _toUtm32(lng, lat); pl.add(e - ox, n - oy, 0); }
+            const utm = ln.map(([lng, lat]) => _toUtm32(lng, lat));
+            let on = null;
+            if (placeRest) { on = terrainDrapeLine(grid, utm); if (!on) st.offTerrain++; }
+            const pl = new rhino.Polyline((on || utm).length);
+            for (const [e, n, z] of on || utm) pl.add(e - ox, n - oy, on ? z : 0);
             doc.objects().addCurve(pl.toPolylineCurve(), attrFor(f, nm)); st.objects++; st.types.curve = (st.types.curve || 0) + 1;
           }
         } else if (g && (g.type === "Point" || g.type === "MultiPoint")) {
           const pts = g.type === "Point" ? [g.coordinates] : g.coordinates;
           for (const [lng, lat] of pts) {
             const [e, n] = _toUtm32(lng, lat);
-            doc.objects().add(new rhino.Point([e - ox, n - oy, 0]), attrFor(f, nm)); st.objects++; st.types.point = (st.types.point || 0) + 1;
+            const z = placeRest ? terrainHeightAt(grid, e, n) : null;
+            if (placeRest && z === null) st.offTerrain++;
+            doc.objects().add(new rhino.Point([e - ox, n - oy, z === null ? 0 : z]), attrFor(f, nm, z === null ? undefined : z)); st.objects++; st.types.point = (st.types.point || 0) + 1;
             if (cat) st.children[cat]++;
           }
         } else st.skipped++;
@@ -1638,6 +1712,29 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
         progress(`3DM: building objects… ${built.toLocaleString()} / ${totalFeatures.toLocaleString()}`);
         await _tick();
       }
+    }
+    layerStats.push(st);
+  }
+
+  if (wantTerrain) {
+    const name = uniqueName("Terrain");
+    const att = manifest.terrainDem.attribution;
+    const st = { name, kind: "terrain", features: terrainTileList.length, objects: 0, flatNoHeight: 0, skipped: 0, skippedIds: [], types: {}, attribution: att, triangles: 0, stepM: grid.step };
+    let lay = addLayer(name);
+    for (let i = 0; i < terrainTileList.length; i++) {
+      const tile = terrainTileList[i], est = tileBytes(tile);
+      if (part.objects > 0 && part.est + est > EXPORT_3DM_PART_BYTES) { await finishDoc(); newDoc(); lay = addLayer(name); }
+      progress(`3DM: terrain mesh ${i + 1} / ${terrainTileList.length}…`);
+      await _tick();
+      const mesh = terrainTileMesh(rhino, grid, tile, ox, oy);
+      const a = new rhino.ObjectAttributes();
+      a.layerIndex = lay.idx; a.name = `Terrain ${tile.key}`;
+      a.setUserString("stepM", String(grid.step));
+      a.setUserString("zUnit", "metres above sea level");
+      doc.objects().add(mesh, a);
+      mesh.delete(); a.delete();
+      st.objects++; st.triangles += tile.cells.length * 2; st.types.mesh = (st.types.mesh || 0) + 1;
+      part.objects++; part.est += est;
     }
     layerStats.push(st);
   }
@@ -1675,7 +1772,12 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     crs: "EPSG:25832", units: "Meters",
     origin: { applied: useOrigin, originEasting: ox, originNorthing: oy, E: ox, N: oy,
       note: useOrigin ? "coordinates in the file = EPSG:25832 minus (E, N)" : "none — absolute EPSG:25832" },
-    precisionNote: "All geometry is Extrusion / Brep / curve / point (double precision); no meshes. Absolute EPSG:25832 coordinates are exact.",
+    precisionNote: "All geometry is Extrusion / Brep / curve / point (double precision); the only meshes are the Terrain layer (double-precision vertices). Absolute EPSG:25832 coordinates are exact.",
+    terrain: grid ? {
+      stepM: grid.step, layer: wantTerrain, placeOnTerrain: placeOn,
+      source: "block mean of the Thuringia DGM1, z = metres above sea level; all heights are read from this same mesh",
+      coverage: "the DGM ends at E 667000: the east of the city has no terrain, objects there stay at z = 0 (offTerrain per layer)",
+    } : undefined,
     selection, selectionGeometry: _rectPolygon(selection).geometry, selectionCrs: "EPSG:4326",
     clipRules: {
       points: "kept when inside the selection (rectangle or curve)",
@@ -1683,16 +1785,21 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
       weimar_admin_boundary: "always whole, never clipped",
     },
     geometry: {
-      buildings: "Rhino Extrusion (closed solid), z 0..height (metres above z = 0, no terrain draping); courtyards = inner profiles; no height => flat single-face Brep (counted in flatNoHeight)",
-      parcels: "flat single-face Brep at z = 0 (no triangulation)", lines: "polyline curves", points: "points",
+      buildings: placeOn
+        ? "Rhino Extrusion (closed solid), z baseZ..baseZ + height, baseZ = lowest point of the terrain mesh under the outline (User Text baseZ), so the uphill side of the base is under the ground; courtyards = inner profiles"
+        : "Rhino Extrusion (closed solid), z 0..height (metres above z = 0, no terrain draping); courtyards = inner profiles; no height => flat single-face Brep (counted in flatNoHeight)",
+      parcels: "flat single-face Brep at z = 0 (no triangulation)",
+      lines: placeOn ? "polyline curves on the terrain mesh, with a vertex at every mesh edge; Space Syntax stays at z = 0" : "polyline curves",
+      points: placeOn ? "points at the terrain height; counting points stay at z = 0" : "points",
     },
     objectCount: objTotal,
     layers: layerStats.map((s, i) => ({
       rhinoLayer: s.name, kind: s.kind, childLayers: s.children, featureCount: s.features, objectCount: s.objects,
-      flatNoHeight: s.flatNoHeight, skipped: s.skipped, skippedIds: s.skippedIds, objectTypes: s.types,
-      attribution: i < collected.length
+      flatNoHeight: s.flatNoHeight, skipped: s.skipped, skippedIds: s.skippedIds, objectTypes: s.types, offTerrain: s.offTerrain || undefined,
+      triangles: s.triangles, stepM: s.stepM,
+      attribution: s.attribution || (i < collected.length
         ? [...new Set(collected[i].layerMetas.map((m) => m.layer.attribution).filter(Boolean))].join(" / ")
-        : "Data Twin City Weimar — team-wide reference frame",
+        : "Data Twin City Weimar — team-wide reference frame"),
       sourceLayers: i < collected.length ? collected[i].layerMetas.map((m) => m.id) : [],
     })),
   };
@@ -1714,17 +1821,20 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     }
     attrib.push("");
   });
+  if (wantTerrain) attrib.push(`- Terrain, ${grid.step} m grid  [Rhino layer “Terrain”]`, `    ${manifest.terrainDem.attribution}`, "");
   if (opts.includeBaseBorder) attrib.push("- Base border  (1 polyline)", "    Data Twin City Weimar — team-wide reference frame", "");
   zip.file("manifest.json", JSON.stringify(manifestOut, null, 2));
   zip.file("ATTRIBUTION.txt", attrib.join("\n"));
   const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const empties = collected.filter((c) => c.mergedFeatures.length === 0).map((c) => c.group.fileId);
+  if (wantTerrain && !terrainTileList.length) empties.push("Terrain");
   const flatTotal = layerStats.reduce((a, s) => a + s.flatNoHeight, 0);
+  const offTotal = layerStats.reduce((a, s) => a + (s.offTerrain || 0), 0);
   console.log(`[export] 3dm done — ${objTotal} objects, ${parts.length} .3dm file(s) ${totalBytes} B, zip ${blob.size} B, ${secs}s`);
   return {
-    blob, empties, total: groups.length, bytes: parts.length === 1 ? parts[0].bytes : parts.map((p) => p.bytes), layerStats, manifestOut,
-    summary: `(${objTotal.toLocaleString()} objects, ${(totalBytes / 1048576).toFixed(1)} MB .3dm${parts.length > 1 ? ` in ${parts.length} files — open part 1, File › Import the rest` : ""}, ${secs} s${flatTotal ? `, ${flatTotal} buildings without height are flat` : ""})`,
+    blob, empties, total: groups.length + (wantTerrain ? 1 : 0), bytes: parts.length === 1 ? parts[0].bytes : parts.map((p) => p.bytes), layerStats, manifestOut,
+    summary: `(${objTotal.toLocaleString()} objects, ${(totalBytes / 1048576).toFixed(1)} MB .3dm${parts.length > 1 ? ` in ${parts.length} files — open part 1, File › Import the rest` : ""}, ${secs} s${flatTotal ? `, ${flatTotal} buildings without height are flat` : ""}${offTotal ? `; ⚠ ${offTotal.toLocaleString()} objects outside the terrain stay at z = 0` : ""})`,
   };
 }
 
@@ -1952,8 +2062,10 @@ function createExportController({ map, viewport, ui }) {
     return groups;
   }
 
+  const terrainLayerOn = () => !!(ui.terrainCb && ui.terrainCb.checked && ui.formatSel.value === "3dm");
+
   function refresh() {
-    const n = checkedGroups().length;
+    const n = checkedGroups().length + (terrainLayerOn() ? 1 : 0);   // the Terrain layer can be exported alone
     if (ui.selectAreaBtn) ui.selectAreaBtn.disabled = !active || n === 0;
     if (ui.selectPolyBtn) ui.selectPolyBtn.disabled = !active || n === 0;
     if (ui.baseBorderBtn) ui.baseBorderBtn.disabled = !active || n === 0;
@@ -2170,6 +2282,8 @@ function createExportController({ map, viewport, ui }) {
     rows.push({ rowEl, exportableIds, checkbox: cb, wrapper, subs, fileId, name: label || exportableIds[0] || fileId });
   }
 
+  if (ui.terrainCb) ui.terrainCb.addEventListener("change", refresh);
+  if (ui.formatSel) ui.formatSel.addEventListener("change", refresh);
   if (ui.exportToggleBtn)
     ui.exportToggleBtn.addEventListener("click", () => setActive(!active));
   if (ui.selectAreaBtn)
@@ -2210,6 +2324,8 @@ function createExportController({ map, viewport, ui }) {
       if (fmt === "3dm") {
         res = await build3dmExport(viewport, groups, selection, {
           ...border, localOrigin: !!(ui.originCb && ui.originCb.checked), onProgress: setStatus,
+          terrainLayer: terrainLayerOn(), placeOnTerrain: !!(ui.placeCb && ui.placeCb.checked),
+          terrainStep: ui.terrainStepSel ? Number(ui.terrainStepSel.value) : null,
         });
         if (!res) { setStatus("3DM export cancelled — pick a smaller area."); return; }
       } else if (fmt === "svg") {
@@ -2414,7 +2530,7 @@ function zoomForMinHeight(metres) {
 
 function createMapLibreBlock(mount, opts) {
   const { title, subtitle, viewport, basemap } = opts;
-  const ui = buildBlockChrome(mount, { title, subtitle, hostClass: "maplibre-host", withExport: true, exportMode: opts.exportMode, materials: opts.materials });
+  const ui = buildBlockChrome(mount, { title, subtitle, hostClass: "maplibre-host", withExport: true, exportMode: opts.exportMode, materials: opts.materials, terrainExport: terrainDemAllowed(viewport) && !!manifest.terrainDem.exportGrid });
   const baseAttribution = basemap?.attribution || BASE_ATTRIBUTION;
   // Either a full remote style URL (e.g. CARTO Positron's published vector
   // style — see its own comment above) or the plain OSM raster built inline.

@@ -8,7 +8,7 @@
  */
 "use strict";
 
-const ZONE_MAX_KM2 = 0.5;                 // export-zone size limit (keeps the 3DM light)
+const LOD2_EST = { bytesPerTriangle: 72, msPerBuilding: 2 };   // 3DM size / build time of a building mesh, measured on the whole city
 const MERC_WORLD = 40075016.68557849;      // EPSG:3857 circumference, m
 const MERC_R = 6378137;
 const SEL_RED = [0.89, 0.15, 0.16];
@@ -302,7 +302,7 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
     pts = []; zone = null; selected = new Set();
     if (map.getSource(SRC)) paint([], false);
     detailed.setSelected(null);
-    setStatus(`Draw a closed contour on the 2D map. Max size ${ZONE_MAX_KM2} km².`);
+    setStatus("Draw a closed contour on the 2D map.");
     refresh();
   }
 
@@ -310,17 +310,12 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
     if (pts.length < 3) { setStatus("Need at least 3 points.", true); return; }
     const area = _zoneAreaKm2(pts);
     stopDrawing();
-    if (area > ZONE_MAX_KM2) {
-      setStatus(`Zone too large: ${area.toFixed(2)} km² (max ${ZONE_MAX_KM2} km²). Draw a smaller one.`, true);
-      pts = []; paint([], false); zone = null; selected = new Set(); detailed.setSelected(null); refresh();
-      return;
-    }
     zone = pts.slice(); pts = [];
     paint(zone, true);
     const local = zone.map(([lng, lat]) => detailed.toLocal(lng, lat));
     selected = detailed.findIntersecting(local);
     detailed.setSelected(selected);
-    setStatus(`${selected.size.toLocaleString()} buildings in the zone · ${area.toFixed(3)} km² (max ${ZONE_MAX_KM2}).`);
+    setStatus(`${selected.size.toLocaleString()} buildings in the zone · ${area.toFixed(3)} km².`);
     refresh();
   }
 
@@ -344,7 +339,7 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
     const c = [e.lngLat.lng, e.lngLat.lat];
     paint(pts, false, c);
     const a = _zoneAreaKm2([...pts, c]);
-    if (pts.length >= 2) setStatus(`${pts.length} point(s) · ≈ ${a.toFixed(3)} km² of max ${ZONE_MAX_KM2}${a > ZONE_MAX_KM2 ? " — too large" : ""}`, a > ZONE_MAX_KM2);
+    if (pts.length >= 2) setStatus(`${pts.length} point(s) · ≈ ${a.toFixed(3)} km²`);
   }
   function onKey(e) {
     if (e.key === "Escape") clearAll();
@@ -390,28 +385,85 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
       const cs = zone.map(([lng, lat]) => _toUtm32(lng, lat));
       const ox = Math.round(cs.reduce((a, c) => a + c[0], 0) / cs.length / 1000) * 1000;
       const oy = Math.round(cs.reduce((a, c) => a + c[1], 0) / cs.length / 1000) * 1000;
-      const doc = new rhino.File3dm();
-      doc.settings().modelUnitSystem = rhino.UnitSystem.Meters;
-      try {
-        doc.strings().set("source", "Data Twin City Weimar — Street Section Analysis");
-        doc.strings().set("crs", "EPSG:25832");
-        doc.strings().set("originEasting", String(ox));
-        doc.strings().set("originNorthing", String(oy));
-      } catch (e) { /* optional */ }
-      const mkLayer = (name, rgb) => {
-        const l = new rhino.Layer(); l.name = name;
-        if (rgb) l.color = { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 };
-        return doc.layers().add(l);
+
+      // parcels touching the zone (first, so the size is known before anything is built)
+      setStatus("Parcels…"); await _tick();
+      const parcelHits = [];
+      if (parcelsConfig) {
+        parcelsPromise = parcelsPromise || fetch(parcelsConfig.url).then((r) => r.json());
+        const fc = await parcelsPromise;
+        let zx0 = Infinity, zy0 = Infinity, zx1 = -Infinity, zy1 = -Infinity;
+        for (const [x, y] of zone) { zx0 = Math.min(zx0, x); zx1 = Math.max(zx1, x); zy0 = Math.min(zy0, y); zy1 = Math.max(zy1, y); }
+        for (const f of fc.features) {
+          const g = f.geometry; if (!g) continue;
+          const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+          for (const rings of polys) {
+            const o = rings[0];
+            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+            for (const [x, y] of o) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+            if (x1 < zx0 || x0 > zx1 || y1 < zy0 || y0 > zy1 || !ringHits(rings, zone)) continue;
+            parcelHits.push({ rings, props: f.properties || {} });
+          }
+        }
+      }
+
+      const list = [...selected];
+      const buildingEst = (b) => (d.tab[b * 8 + 3] / 3) * LOD2_EST.bytesPerTriangle;
+      const estBytes = list.reduce((sum, b) => sum + buildingEst(b), 0) + parcelHits.length * EXPORT_3DM_EST.parcel.bytes;
+      if (estBytes > EXPORT_3DM_PART_BYTES) {
+        const secs = (list.length * LOD2_EST.msPerBuilding + parcelHits.length * EXPORT_3DM_EST.parcel.ms) / 1000;
+        const ok = window.confirm(
+          `This zone holds ${list.length.toLocaleString()} buildings and ${parcelHits.length.toLocaleString()} parcels — about ${(estBytes / 1048576).toFixed(0)} MB (estimate), ` +
+          `split into about ${Math.ceil(estBytes / EXPORT_3DM_PART_BYTES)} .3dm files of up to ${EXPORT_3DM_PART_BYTES / 1048576} MB. It will take about ${Math.max(1, Math.round(secs / 60))} min to build.\n\n` +
+          "OK = continue, Cancel = go back and draw a smaller zone.");
+        if (!ok) { setStatus("Export cancelled — draw a smaller zone."); return; }
+      }
+
+      // Rhino document(s): rhino3dm.js damages a file over ~150 MB, so split at EXPORT_3DM_PART_BYTES (estimate) and read each part back
+      const parts = [];          // { est, objects, bytes, file }
+      let doc = null, part = null, layB, layP, layZ;
+      const newDoc = () => {
+        doc = new rhino.File3dm();
+        doc.settings().modelUnitSystem = rhino.UnitSystem.Meters;
+        try {
+          doc.strings().set("source", "Data Twin City Weimar — Street Section Analysis");
+          doc.strings().set("crs", "EPSG:25832");
+          doc.strings().set("originEasting", String(ox));
+          doc.strings().set("originNorthing", String(oy));
+        } catch (e) { /* optional */ }
+        const mkLayer = (name, rgb) => {
+          const l = new rhino.Layer(); l.name = name;
+          if (rgb) l.color = { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 };
+          return doc.layers().add(l);
+        };
+        layB = mkLayer("Detailed Buildings", [40, 40, 40]);
+        layP = mkLayer("Parcels", [120, 120, 120]);
+        layZ = mkLayer("Export zone", [227, 38, 42]);
+        part = { est: 0, objects: 0, bytes: null };
       };
-      const layB = mkLayer("Detailed Buildings", [40, 40, 40]);
-      const layP = mkLayer("Parcels", [120, 120, 120]);
-      const layZ = mkLayer("Export zone", [227, 38, 42]);
+      const finishDoc = async () => {
+        setStatus(`Writing file${parts.length ? ` (part ${parts.length + 1})` : ""}…`); await _tick();
+        const bytes = doc.toByteArray();
+        const count = doc.objects().count;
+        doc.delete();
+        const check = rhino.File3dm.fromByteArray(bytes);
+        const ok = !!check && check.objects().count === count;
+        if (check) check.delete();
+        if (!ok) throw new Error(`rhino3dm wrote a damaged .3dm (part ${parts.length + 1}, ${(bytes.length / 1048576).toFixed(0)} MB)`);
+        part.bytes = bytes;
+        parts.push(part);
+      };
+      const reserve = async (est) => {   // next object goes to a new file when it does not fit into this one
+        if (part.objects > 0 && part.est + est > EXPORT_3DM_PART_BYTES) { await finishDoc(); newDoc(); }
+        part.est += est; part.objects++;
+      };
+      newDoc();
 
       // buildings -> meshes
-      const list = [...selected];
       let nTri = 0;
       for (let n = 0; n < list.length; n++) {
         const b = list[n];
+        await reserve(buildingEst(b));
         const vs = d.tab[b * 8], vc = d.tab[b * 8 + 1], is = d.tab[b * 8 + 2], ic = d.tab[b * 8 + 3];
         const mesh = new rhino.Mesh();
         for (let v = vs; v < vs + vc; v++) {
@@ -426,37 +478,27 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
         a.setUserString("height", d.height[b].toFixed(2));
         a.setUserString("baseZ_ellipsoidal", d.basez[b].toFixed(2));
         doc.objects().add(mesh, a);
+        mesh.delete(); a.delete();     // the document keeps its own copy; a large zone would run out of WASM memory otherwise
         nTri += ic / 3;
-        if (n % 150 === 0) { setStatus(`Building meshes… ${n}/${list.length}`); await _tick(); }
+        if (n % 150 === 0) { setStatus(`Building meshes… ${n.toLocaleString()} / ${list.length.toLocaleString()}`); await _tick(); }
       }
 
-      // parcels touching the zone -> flat Breps
-      setStatus("Parcels…"); await _tick();
+      // parcels -> flat Breps
       let nParcels = 0, pSkipped = 0;
-      if (parcelsConfig) {
-        parcelsPromise = parcelsPromise || fetch(parcelsConfig.url).then((r) => r.json());
-        const fc = await parcelsPromise;
-        let zx0 = Infinity, zy0 = Infinity, zx1 = -Infinity, zy1 = -Infinity;
-        for (const [x, y] of zone) { zx0 = Math.min(zx0, x); zx1 = Math.max(zx1, x); zy0 = Math.min(zy0, y); zy1 = Math.max(zy1, y); }
-        for (const f of fc.features) {
-          const g = f.geometry; if (!g) continue;
-          const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
-          for (const rings of polys) {
-            const o = rings[0];
-            let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-            for (const [x, y] of o) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-            if (x1 < zx0 || x0 > zx1 || y1 < zy0 || y0 > zy1 || !ringHits(rings, zone)) continue;
-            const r = _polygonObject(rhino, rings, 0, ox, oy);
-            if (r.skip) { pSkipped++; continue; }
-            const a = new rhino.ObjectAttributes();
-            a.layerIndex = layP;
-            const p = f.properties || {};
-            a.name = String(p.label || p.nationalCadastralReference || "");
-            const us = _userStrings(p, ["usage", "useCategory", "area", "areaSource"]);
-            for (const k in us) a.setUserString(k, us[k]);
-            doc.objects().add(r.geom, a); nParcels++;
-          }
-        }
+      for (let n = 0; n < parcelHits.length; n++) {
+        const { rings, props: p } = parcelHits[n];
+        const r = _polygonObject(rhino, rings, 0, ox, oy);
+        if (r.skip) { pSkipped++; continue; }
+        await reserve(EXPORT_3DM_EST.parcel.bytes);
+        const a = new rhino.ObjectAttributes();
+        a.layerIndex = layP;
+        a.name = String(p.label || p.nationalCadastralReference || "");
+        const us = _userStrings(p, ["usage", "useCategory", "area", "areaSource"]);
+        for (const k in us) a.setUserString(k, us[k]);
+        doc.objects().add(r.geom, a);
+        r.geom.delete(); a.delete();
+        nParcels++;
+        if (n % 250 === 0) { setStatus(`Parcels… ${n.toLocaleString()} / ${parcelHits.length.toLocaleString()}`); await _tick(); }
       }
 
       // zone outline
@@ -464,19 +506,25 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
       for (const c of [...cs, cs[0]]) pl.add(c[0] - ox, c[1] - oy, 0);
       const za = new rhino.ObjectAttributes(); za.layerIndex = layZ; za.name = "Export zone";
       doc.objects().addCurve(pl.toPolylineCurve(), za);
+      part.objects++;
 
-      setStatus("Writing file…"); await _tick();
-      const bytes = doc.toByteArray();
-      if (doc.delete) doc.delete();
+      await finishDoc();
 
       const area = _zoneAreaKm2(zone);
       const zip = new JSZip();
-      const fileName = `weimar_street_section_zone.3dm`;
-      zip.file(fileName, bytes);
+      const stem = "weimar_street_section_zone";
+      parts.forEach((q, i) => {
+        q.file = parts.length === 1 ? `${stem}.3dm` : `${stem}_part${i + 1}of${parts.length}.3dm`;
+        zip.file(q.file, q.bytes);
+      });
+      const totalBytes = parts.reduce((sum, q) => sum + q.bytes.length, 0);
+      const splitNote = `Split into ${parts.length} files (rhino3dm.js cannot write one .3dm over ~150 MB). Open part 1, then File > Import the other parts — layers with the same name merge.`;
       zip.file("manifest.json", JSON.stringify({
-        generated, viewport, format: "3dm (rhino3dm.js 8.4.0)", file: fileName, crs: "EPSG:25832", units: "Meters",
+        generated, viewport, format: "3dm (rhino3dm.js 8.4.0)", crs: "EPSG:25832", units: "Meters",
+        files: parts.map((q) => ({ file: q.file, objectCount: q.objects, bytes: q.bytes.length })),
+        filesNote: parts.length === 1 ? undefined : splitNote,
         origin: { originEasting: ox, originNorthing: oy, note: "coordinates in the file = EPSG:25832 minus (E, N); z = metres above each building's lowest point" },
-        zone: { areaKm2: Number(area.toFixed(4)), maxKm2: ZONE_MAX_KM2, polygonLngLat: zone },
+        zone: { areaKm2: Number(area.toFixed(4)), polygonLngLat: zone },
         selectionRule: "every building mesh that overlaps the zone, even partly, is exported whole",
         layers: { "Detailed Buildings": { objects: list.length, triangles: nTri, geometry: "triangle mesh (WEGA LoD2 with roofs)" },
           Parcels: { objects: nParcels, skipped: pSkipped, geometry: "flat single-face Brep, z = 0" }, "Export zone": { objects: 1 } },
@@ -484,12 +532,14 @@ function createZoneExport({ map, ui, viewport, detailed, parcelsConfig, to2D }) 
       zip.file("ATTRIBUTION.txt", [
         "Data Twin City Weimar — Street Section Analysis, 3DM export", `Generated: ${generated}`,
         "CRS: EPSG:25832, units metres; local origin applied: add E " + ox + ", N " + oy,
+        ...(parts.length > 1 ? [splitNote] : []),
         "", "Detailed Buildings: © GDI-Th, WEGA 3D-Gebäudemodelle LoD2, Datenlizenz Deutschland – Namensnennung 2.0",
         "Parcels: © GDI-Th, ALKIS, Datenlizenz Deutschland – Namensnennung 2.0",
       ].join("\n"));
+      setStatus("Packing zip…"); await _tick();
       const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
       triggerDownload(blob, `weimar_street_section_zone_${_downloadStamp()}.zip`);
-      setStatus(`Downloaded: ${list.length.toLocaleString()} buildings, ${nParcels} parcels · ${(bytes.length / 1048576).toFixed(1)} MB .3dm · ${((performance.now() - t0) / 1000).toFixed(1)} s · local origin E ${ox} / N ${oy}`);
+      setStatus(`Downloaded: ${list.length.toLocaleString()} buildings, ${nParcels} parcels · ${(totalBytes / 1048576).toFixed(1)} MB .3dm${parts.length > 1 ? ` in ${parts.length} files — open part 1, then Import the others` : ""} · ${((performance.now() - t0) / 1000).toFixed(1)} s · local origin E ${ox} / N ${oy}`);
     } catch (err) {
       console.error("[zone export] failed:", err);
       setStatus(`Export failed: ${err.message}`, true);
