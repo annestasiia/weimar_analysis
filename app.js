@@ -1228,6 +1228,7 @@ async function buildExportZip(viewport, groups, selection, opts = {}) {
 //   parcels/polys  -> flat single-face Brep at z = 0 (Brep.createTrimmedPlane; with holes:
 //                     bottom face of a thin capped Extrusion) — no triangulation, no meshes
 //   lines          -> polyline curves;  points -> points
+//   admin boundary -> closed polyline curve at z = 0 (a polygon in the data, an outline in Rhino)
 // Everything is double precision (no float32 meshes). Rings are cleaned (repeated /
 // collinear vertices) and self-intersecting rings are NOT built: their ids are listed
 // in manifest.json (`skippedIds`). "Local origin" mode subtracts a rounded origin
@@ -1472,6 +1473,7 @@ function _isBuildingLayer(layer) {
   return /^weimar_buildings/.test(layer.id) || /buildings_footprint/.test(layer.url || "");
 }
 function _isParcelLayer(layer) { return /^weimar_parcels(_use|_outline)?$/.test(layer.id); }
+function _isBoundaryLayer(layer) { return layer.id === "weimar_admin_boundary"; }
 // Counting points: one Rhino parent layer (layer.rhinoLayer), one child per year (layer.rhinoChild, only the years ticked in the export).
 function _isCountingLayer(layer) { return !!(layer.rhinoLayer && layer.rhinoChild); }
 
@@ -1603,6 +1605,7 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
     const isF = layerMetas.some((m) => _isFootprintLayer(m.layer));   // TASK 30: flat, z=0, named by buildingId
     const isB = !isF && layerMetas.some((m) => _isBuildingLayer(m.layer));
     const isP = layerMetas.some((m) => _isParcelLayer(m.layer));
+    const isA = layerMetas.some((m) => _isBoundaryLayer(m.layer));
     // Parent layer + one child per category (always all of them, so the Layers panel looks the same for any
     // selection; empty categories stay empty). Child names are not in usedNames: Rhino only needs them unique per parent.
     const placePoly = placeOn && (isF || isB);                     // flat polygons (parcels, land cover ...) stay at z = 0
@@ -1664,7 +1667,15 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
           curLayerIdx = childIdx.get(cat);
         }
         const polys = !g ? [] : g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : null;
-        if (polys) {
+        if (polys && isA) {
+          for (const ring of polys.flat()) {
+            const pl = new rhino.Polyline(ring.length);
+            for (const [lng, lat] of ring) {
+              const [e, n] = _toUtm32(lng, lat); pl.add(e - ox, n - oy, 0);
+            }
+            doc.objects().addCurve(pl.toPolylineCurve(), attrFor(f, nm)); st.objects++; st.types.curve = (st.types.curve || 0) + 1;
+          }
+        } else if (polys) {
           const h = isB ? Number(f.properties && f.properties.height) : 0;
           const hasH = isB && Number.isFinite(h) && h > 0;
           if (isB && !hasH) st.flatNoHeight++;
@@ -1798,6 +1809,7 @@ async function build3dmExport(viewport, groups, selection, opts = {}) {
         : "Rhino Extrusion (closed solid), z 0..height (metres above z = 0, no terrain draping); courtyards = inner profiles; no height => flat single-face Brep (counted in flatNoHeight)",
       parcels: "flat single-face Brep at z = 0 (no triangulation)",
       lines: placeOn ? "polyline curves on the terrain mesh, with a vertex at every mesh edge; Space Syntax stays at z = 0" : "polyline curves",
+      adminBoundary: "closed polyline curve at z = 0",
       points: placeOn ? "points at the terrain height; counting points stay at z = 0" : "points",
     },
     objectCount: objTotal,
